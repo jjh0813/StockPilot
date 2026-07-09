@@ -75,6 +75,29 @@ uv run uvicorn app.main:app --reload
 
 ---
 
+## 📄 문서 처리 파이프라인
+
+PDF·이미지는 Upstage Document Parse로 표와 제목 구조를 보존한 Markdown으로
+변환한 뒤 RAG에 적재합니다. Document Parse가 실패하면 PDF는 기존 pypdf
+파서로 대체할 수 있습니다. Information Extract를 함께 사용하면 주요 사업,
+위험요인, 소송·제재, 감사의견을 JSON으로 추출해 `document_facts`에 저장합니다.
+
+```bash
+# 파싱·청킹 결과만 로컬에서 확인
+uv run python data/scripts/ingest_rag.py prepare-file \
+  --path report.pdf --parser upstage --business-report --extract-facts
+
+# Supabase documents + document_facts에 적재
+uv run python data/scripts/ingest_rag.py ingest-file \
+  --path report.pdf --parser upstage --business-report --extract-facts \
+  --source-id report:sample --title "샘플 사업보고서"
+```
+
+문서 적재 시에만 Document Parse·Information Extract를 호출하고, 사용자 질문
+시에는 미리 저장한 pgvector 청크와 구조화 정보를 조회합니다.
+
+---
+
 ## ⚙️ 환경변수
 
 | 변수 | 설명 | 예시 / 기본값 |

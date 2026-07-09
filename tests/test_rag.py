@@ -29,6 +29,22 @@ def test_chunk_document_preserves_report_sections():
     assert [chunk["chunk_index"] for chunk in chunks] == list(range(len(chunks)))
 
 
+def test_chunk_document_recognizes_document_parse_markdown_headings():
+    content = "\n".join(
+        [
+            "# Ⅰ. 회사의 개요",
+            "회사의 일반적인 설명입니다. " * 20,
+            "## Ⅱ. 사업의 내용",
+            "반도체 사업에 관한 설명입니다. " * 20,
+        ]
+    )
+
+    chunks = chunk_document(content, chunk_size=240, chunk_overlap=30)
+
+    assert chunks[0]["section"] == "Ⅰ. 회사의 개요"
+    assert any(chunk["section"] == "Ⅱ. 사업의 내용" for chunk in chunks)
+
+
 def test_chunk_document_rejects_invalid_overlap():
     with pytest.raises(ValueError):
         chunk_document("충분한 본문입니다. " * 20, chunk_size=100, chunk_overlap=100)
