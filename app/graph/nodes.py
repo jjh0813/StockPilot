@@ -2,6 +2,7 @@
 from langchain_core.messages import AIMessage
 from loguru import logger
 
+from app.core.market_time import tag_session
 from app.graph.state import StockPilotState
 from app.tools.executor import ToolExecutor
 
@@ -64,6 +65,8 @@ async def tool_node(state: StockPilotState) -> dict:
         {"company": ticker, "direction": direction},
     )
     news_items = news.get("data", {}).get("news", [])
+    # 발행 시각을 정규장 기준 구간(장전/장중/장후)으로 태깅
+    news_items = [tag_session(item) for item in news_items]
     logger.info(f"🔧 [Tool] 수집 완료 | 뉴스 {len(news_items)}건")
     return {
         "price_data": price.get("data"),
@@ -107,7 +110,9 @@ async def response_node(state: StockPilotState) -> dict:
             for item in news_items[:5]:
                 title = item.get("title", "")
                 source = item.get("source_domain", "")
-                suffix = f" ({source})" if source else ""
+                session = item.get("market_session", "")
+                meta = " · ".join(x for x in (source, session) if x)
+                suffix = f" ({meta})" if meta else ""
                 lines.append(f" • {title}{suffix}")
         else:
             lines.append("관련 뉴스를 찾지 못했어요.")
