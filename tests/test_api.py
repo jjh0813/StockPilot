@@ -1,3 +1,6 @@
-"""API 엔드포인트 테스트 (health, chat)."""
+"""FastAPI 앱 로드 테스트. (실제 엔드포인트는 API 라우터 구현 단계에서 추가)"""
+from app.main import app
 
-# TODO: test_health, test_chat_success(mock), test_validation_error
+
+def test_app_created():
+    assert app.title == "StockPilot API"
