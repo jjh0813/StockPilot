@@ -1,9 +1,12 @@
 """에이전트/그래프 단위 테스트 (네트워크·API 키 불필요)."""
+
 from langchain_core.messages import HumanMessage
 
 from app.graph.edges import route_by_intent
 from app.graph.nodes import _format_change, response_node, router_node
 from app.graph.state import create_initial_state
+from app.tools.executor import _normalize_news_item
+from tests.fixtures.tool_responses import directional_news_item, stock_snapshot
 
 
 def test_create_initial_state():
@@ -46,10 +49,12 @@ async def test_router_node_tool():
 async def test_response_node_format():
     state = create_initial_state("s")
     state["ticker"] = "삼성전자"
-    state["price_data"] = {"name": "삼성전자", "change_pct": -2.3, "current_price": 71000}
-    state["news_items"] = [
-        {"title": "일부 생산라인 가동 중단 검토", "source_domain": "edaily.co.kr"},
-    ]
+    state["price_data"] = {
+        **stock_snapshot(),
+        "change_pct": -2.3,
+        "current_price": 71000,
+    }
+    state["news_items"] = [_normalize_news_item(directional_news_item(), "down")]
     result = await response_node(state)
     content = result["messages"][-1].content
     assert "삼성전자" in content
