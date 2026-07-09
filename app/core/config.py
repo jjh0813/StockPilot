@@ -1,16 +1,74 @@
-"""환경변수 설정 (pydantic-settings). Solar/네이버/DART/Supabase 키 로드."""
+"""애플리케이션 설정.
+
+.env 파일과 환경변수에서 값을 읽어 타입 안전하게 관리한다.
+- 다른 모듈에서는 `from app.core.config import settings` 로 사용한다.
+- API 키들은 선택(Optional)이라 비어 있어도 서버는 뜬다(Mock 개발 단계 대비).
+  실제 연동 단계(Day3)에서 .env에 값을 채운다.
+"""
+from functools import lru_cache
+from typing import Literal
+
+from loguru import logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-    # TODO: environment, debug, upstage_api_key, llm_model,
-    #       naver_client_id, naver_client_secret, dart_api_key,
-    #       supabase_url, supabase_key
+    """환경변수 설정 스키마.
+
+    환경변수 이름은 대소문자 구분 없이 필드명과 매핑된다.
+    예) UPSTAGE_API_KEY  ->  upstage_api_key
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",          # .env에 모르는 키가 있어도 무시
+        case_sensitive=False,
+    )
+
+    # ── 실행 환경 ──────────────────────────────
+    environment: Literal["development", "staging", "production", "test"] = "development"
+    debug: bool = True
+    host: str = "0.0.0.0"
+    port: int = 8000
+
+    # ── LLM (Upstage Solar) ───────────────────
+    upstage_api_key: str | None = None
+    llm_model: str = "solar-pro3"
+
+    # ── 뉴스 (네이버 검색 API) ─────────────────
+    naver_client_id: str | None = None
+    naver_client_secret: str | None = None
+
+    # ── 공시 (OpenDART) ───────────────────────
+    dart_api_key: str | None = None
+
+    # ── RAG / 저장 (Supabase) ─────────────────
+    supabase_url: str | None = None
+    supabase_key: str | None = None
 
 
+@lru_cache
 def get_settings() -> Settings:
-    ...  # TODO: 싱글톤 반환
+    """설정 싱글톤 반환. lru_cache로 한 번만 생성해 재사용한다."""
+    return Settings()
 
 
-# settings = get_settings()  # TODO
+# 전역 설정 객체 — 다른 모듈에서 `from app.core.config import settings`
+settings = get_settings()
+
+
+def warn_missing_keys() -> None:
+    """필수 키 누락 시 경고만 남긴다(서버는 계속 실행). 서버 시작 시 호출 예정."""
+    missing = [
+        name
+        for name, value in {
+            "UPSTAGE_API_KEY": settings.upstage_api_key,
+            "NAVER_CLIENT_ID": settings.naver_client_id,
+            "DART_API_KEY": settings.dart_api_key,
+            "SUPABASE_URL": settings.supabase_url,
+        }.items()
+        if not value
+    ]
+    if missing:
+        logger.warning(f"환경변수 미설정(현재 Mock 개발 가능): {', '.join(missing)}")
