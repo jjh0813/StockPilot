@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from app.repositories.rag import chunk_document, load_glossary, load_local_document
+from app.repositories.rag import (
+    chunk_document,
+    load_glossary,
+    load_local_document,
+    select_business_report_chunks,
+)
 
 
 def test_chunk_document_preserves_report_sections():
@@ -46,3 +51,20 @@ def test_load_local_markdown(tmp_path):
 
     assert "사업보고서" in content
     assert "사업의 내용" in content
+
+
+def test_select_business_report_chunks_excludes_financial_statements():
+    chunks = [
+        {"chunk_index": 0, "section": "나. 설립일자", "content": "회사 개요"},
+        {"chunk_index": 1, "section": "1. 사업의 개요", "content": "사업 설명"},
+        {"chunk_index": 2, "section": "가. 주요 제품", "content": "제품 설명"},
+        {"chunk_index": 3, "section": "가. 요약연결재무정보", "content": "재무 표"},
+    ]
+
+    selected = select_business_report_chunks(chunks)
+
+    assert [chunk["section"] for chunk in selected] == [
+        "1. 사업의 개요",
+        "가. 주요 제품",
+    ]
+    assert [chunk["chunk_index"] for chunk in selected] == [0, 1]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -154,6 +155,54 @@ async def ingest_text_document(
     )
 
 
+async def ingest_business_report(
+    *,
+    source_id: str,
+    content: str,
+    metadata: dict[str, Any],
+) -> int:
+    """사업보고서에서 사업 설명 영역만 선별해 적재합니다."""
+    chunks = select_business_report_chunks(chunk_document(content))
+    return await save_chunks(
+        source_id=source_id,
+        chunks=chunks,
+        base_metadata=metadata,
+    )
+
+
+def select_business_report_chunks(chunks: list[dict]) -> list[dict]:
+    """대용량 재무제표·임원 표를 제외하고 사업의 내용 영역을 선택합니다."""
+    start = next(
+        (
+            index
+            for index, chunk in enumerate(chunks)
+            if "사업의 개요" in chunk["section"]
+        ),
+        None,
+    )
+    if start is None:
+        logger.warning("사업의 개요 경계를 찾지 못해 앞쪽 100개 청크만 적재합니다.")
+        selected = chunks[:100]
+    else:
+        end_markers = ("요약연결재무정보", "요약재무정보", "연결재무제표")
+        end = next(
+            (
+                index
+                for index, chunk in enumerate(chunks[start + 1 :], start + 1)
+                if any(marker in chunk["section"] for marker in end_markers)
+            ),
+            min(len(chunks), start + 100),
+        )
+        selected = chunks[start:end]
+
+    if not selected:
+        raise ValueError("사업보고서에서 적재할 사업 내용 청크를 찾지 못했습니다.")
+    for index, chunk in enumerate(selected):
+        chunk["chunk_index"] = index
+    logger.info(f"사업보고서 핵심 영역 선별: {len(chunks)} → {len(selected)} chunks")
+    return selected
+
+
 async def save_chunks(
     *,
     source_id: str,
@@ -163,11 +212,16 @@ async def save_chunks(
     embeddings = get_embeddings()
     texts = [chunk["content"] for chunk in chunks]
     vectors: list[list[float]] = []
+    logger.info(
+        f"Solar 임베딩 시작: {len(texts)} chunks, "
+        f"batch_size={settings.rag_embedding_batch_size}"
+    )
     for start in range(0, len(texts), settings.rag_embedding_batch_size):
-        vectors.extend(
-            await embeddings.aembed_documents(
-                texts[start : start + settings.rag_embedding_batch_size]
-            )
+        batch = texts[start : start + settings.rag_embedding_batch_size]
+        batch_vectors = await _embed_batch_with_retry(embeddings, batch)
+        vectors.extend(batch_vectors)
+        logger.info(
+            f"Solar 임베딩 진행: {min(start + len(batch), len(texts))}/{len(texts)}"
         )
     if vectors and len(vectors[0]) != settings.embedding_dimension:
         raise RuntimeError(
@@ -211,13 +265,36 @@ async def save_chunks(
     return len(rows)
 
 
+async def _embed_batch_with_retry(
+    embeddings: UpstageEmbeddings,
+    batch: list[str],
+    *,
+    attempts: int = 3,
+) -> list[list[float]]:
+    for attempt in range(1, attempts + 1):
+        try:
+            return await asyncio.wait_for(
+                embeddings.aembed_documents(batch),
+                timeout=120,
+            )
+        except Exception as exc:
+            if attempt == attempts:
+                raise
+            logger.warning(
+                f"임베딩 배치 실패({type(exc).__name__}), "
+                f"{attempt}/{attempts}회 재시도"
+            )
+            await asyncio.sleep(2 ** (attempt - 1))
+    raise RuntimeError("임베딩 재시도 횟수를 초과했습니다.")
+
+
 async def search_documents(
     query: str,
     top_k: int = 4,
     *,
     corp_code: str | None = None,
     source_type: str | None = None,
-    threshold: float = 0.45,
+    threshold: float = 0.3,
 ) -> list[dict]:
     """팀원 A의 rag_node가 호출할 검색 인터페이스."""
     if not query.strip():
@@ -245,7 +322,7 @@ class RAGRepository:
         k: int = 4,
         corp_code: str | None = None,
         source_type: str | None = None,
-        threshold: float = 0.45,
+        threshold: float = 0.3,
     ) -> list[dict]:
         return await search_documents(
             query,

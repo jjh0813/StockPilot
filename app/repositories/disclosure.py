@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import re
+import warnings
 import zipfile
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -11,7 +12,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 from app.core.config import settings
 
@@ -234,7 +235,10 @@ def extract_primary_document(archive_content: bytes) -> tuple[str, str]:
     if Path(filename).suffix.lower() == ".txt":
         text = _normalize_text(decoded)
     else:
-        soup = BeautifulSoup(decoded, "html.parser")
+        # DART의 .xml은 실제 내용이 HTML/SGML에 가까워 html.parser가 더 관대하다.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", XMLParsedAsHTMLWarning)
+            soup = BeautifulSoup(decoded, "html.parser")
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
         text = _normalize_text(soup.get_text("\n"))

@@ -28,7 +28,7 @@ create index if not exists documents_metadata_idx
 create or replace function public.match_documents(
   query_embedding vector(4096),
   match_count integer default 4,
-  match_threshold float default 0.45,
+  match_threshold float default 0.3,
   filter_corp_code text default null,
   filter_source_type text default null
 )

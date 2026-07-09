@@ -25,6 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.repositories.disclosure import get_business_report  # noqa: E402
 from app.repositories.rag import (  # noqa: E402
     chunk_document,
+    ingest_business_report,
     ingest_glossary,
     ingest_text_document,
     load_local_document,
@@ -96,7 +97,7 @@ async def main_async(args: argparse.Namespace) -> None:
             "receipt_no": report["receipt_no"],
         }
         if command == "ingest-dart":
-            saved = await ingest_text_document(
+            saved = await ingest_business_report(
                 source_id=f"dart:{report['receipt_no']}",
                 content=report["content"],
                 metadata=metadata,
