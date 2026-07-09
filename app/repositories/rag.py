@@ -29,6 +29,23 @@ _KNOWN_HEADINGS = (
     "위험 요인",
     "재무에 관한 사항",
 )
+_RISK_SECTION_KEYWORDS = (
+    "재무위험관리",
+    "우발부채와 약정사항",
+    "중요한 소송사건",
+    "제재현황",
+    "경영진단",
+    "유동성 및 자금조달",
+    "회계감사인의 감사의견",
+    "파생상품 및 위험관리정책",
+    "파생상품 및 풋백옵션",
+    "법규상의 규제",
+    "환경 관련 규제",
+    "중요한 회계추정",
+    "충당부채",
+    "사채관리계약",
+    "재무제표 재작성",
+)
 
 
 def get_embeddings() -> UpstageEmbeddings:
@@ -171,7 +188,7 @@ async def ingest_business_report(
 
 
 def select_business_report_chunks(chunks: list[dict]) -> list[dict]:
-    """대용량 재무제표·임원 표를 제외하고 사업의 내용 영역을 선택합니다."""
+    """사업 설명과 문서 후반의 핵심 위험 섹션을 함께 선택합니다."""
     start = next(
         (
             index
@@ -182,7 +199,7 @@ def select_business_report_chunks(chunks: list[dict]) -> list[dict]:
     )
     if start is None:
         logger.warning("사업의 개요 경계를 찾지 못해 앞쪽 100개 청크만 적재합니다.")
-        selected = chunks[:100]
+        business_chunks = chunks[:100]
     else:
         end_markers = ("요약연결재무정보", "요약재무정보", "연결재무제표")
         end = next(
@@ -193,13 +210,25 @@ def select_business_report_chunks(chunks: list[dict]) -> list[dict]:
             ),
             min(len(chunks), start + 100),
         )
-        selected = chunks[start:end]
+        business_chunks = chunks[start:end]
+
+    risk_chunks = [
+        chunk
+        for chunk in chunks
+        if any(keyword in chunk["section"] for keyword in _RISK_SECTION_KEYWORDS)
+    ]
+    selected_ids = {id(chunk) for chunk in business_chunks + risk_chunks}
+    selected = [chunk for chunk in chunks if id(chunk) in selected_ids]
 
     if not selected:
         raise ValueError("사업보고서에서 적재할 사업 내용 청크를 찾지 못했습니다.")
     for index, chunk in enumerate(selected):
         chunk["chunk_index"] = index
-    logger.info(f"사업보고서 핵심 영역 선별: {len(chunks)} → {len(selected)} chunks")
+    logger.info(
+        "사업보고서 핵심 영역 선별: "
+        f"전체={len(chunks)}, 사업={len(business_chunks)}, "
+        f"위험={len(risk_chunks)}, 중복제거후={len(selected)} chunks"
+    )
     return selected
 
 

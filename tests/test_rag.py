@@ -59,6 +59,17 @@ def test_select_business_report_chunks_excludes_financial_statements():
         {"chunk_index": 1, "section": "1. 사업의 개요", "content": "사업 설명"},
         {"chunk_index": 2, "section": "가. 주요 제품", "content": "제품 설명"},
         {"chunk_index": 3, "section": "가. 요약연결재무정보", "content": "재무 표"},
+        {
+            "chunk_index": 4,
+            "section": "16. 우발부채와 약정사항 (연결)",
+            "content": "우발부채",
+        },
+        {"chunk_index": 5, "section": "일반 임원 현황", "content": "임원 명단"},
+        {
+            "chunk_index": 6,
+            "section": "나. 행정기관의 제재현황",
+            "content": "제재 내용",
+        },
     ]
 
     selected = select_business_report_chunks(chunks)
@@ -66,5 +77,7 @@ def test_select_business_report_chunks_excludes_financial_statements():
     assert [chunk["section"] for chunk in selected] == [
         "1. 사업의 개요",
         "가. 주요 제품",
+        "16. 우발부채와 약정사항 (연결)",
+        "나. 행정기관의 제재현황",
     ]
-    assert [chunk["chunk_index"] for chunk in selected] == [0, 1]
+    assert [chunk["chunk_index"] for chunk in selected] == [0, 1, 2, 3]
