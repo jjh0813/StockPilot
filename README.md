@@ -56,10 +56,18 @@ uv sync
 copy .env.example .env      # Windows
 # cp .env.example .env      # macOS / Linux
 
-# 3) (RAG용) 투자 용어·공시 문서 임베딩 적재
+# 3) Supabase SQL Editor에서 data/supabase_schema.sql 실행
+
+# 4) 투자 용어 사전 임베딩 적재
 uv run python data/scripts/ingest_rag.py
 
-# 4) 개발 서버 실행
+# 5) 사업보고서 파싱 결과만 먼저 확인(선택)
+uv run python data/scripts/ingest_rag.py fetch-dart --company 삼성전자
+
+# 6) 사업보고서를 Supabase에 적재(선택)
+uv run python data/scripts/ingest_rag.py ingest-dart --company 삼성전자
+
+# 7) 개발 서버 실행
 uv run uvicorn app.main:app --reload
 ```
 
@@ -75,11 +83,15 @@ uv run uvicorn app.main:app --reload
 | `DEBUG` | 디버그 모드 | `true` |
 | `UPSTAGE_API_KEY` | Upstage Solar API 키 | — |
 | `LLM_MODEL` | 사용할 Solar 모델명 | `solar-pro3` |
+| `EMBEDDING_MODEL` | 문서·질문 임베딩 모델 | `solar-embedding-1-large` |
+| `EMBEDDING_DIMENSION` | pgvector와 맞출 임베딩 차원 | `4096` |
 | `NAVER_CLIENT_ID` | 네이버 검색 API Client ID | — |
 | `NAVER_CLIENT_SECRET` | 네이버 검색 API Client Secret | — |
 | `DART_API_KEY` | OpenDART 인증키 | — |
 | `SUPABASE_URL` | Supabase 프로젝트 URL | — |
-| `SUPABASE_KEY` | Supabase API 키 | — |
+| `SUPABASE_KEY` | 백엔드 전용 Supabase service-role 키 | — |
+| `RAG_CHUNK_SIZE` | 공시 문서 청크 최대 문자 수 | `1600` |
+| `RAG_CHUNK_OVERLAP` | 인접 청크 중복 문자 수 | `200` |
 
 > `.env`는 절대 커밋하지 않습니다. (`.gitignore`에 등록)
 
@@ -116,6 +128,7 @@ StockPilot/
 │       └── health.py          # 헬스체크
 ├── data/
 │   ├── glossary.json          # 투자 용어 사전 (RAG 원본)
+│   ├── supabase_schema.sql    # documents·pgvector 검색 함수
 │   └── scripts/
 │       └── ingest_rag.py      # 용어·공시 문서 임베딩 적재
 ├── frontend/                  # React + React Bits (별도 프론트)
@@ -184,6 +197,24 @@ StockPilot/
 | `add_watchlist` | ticker, session_id | 관심 종목 저장 | Supabase |
 
 > `find_positive_news_stocks`·`add_watchlist`는 여유 시 구현(MVP 우선순위상 후순위).
+
+### 팀원 A와 RAG 연결
+
+`rag_node`에서는 아래 함수만 호출하면 됩니다.
+
+```python
+from app.repositories.rag import search_documents
+
+documents = await search_documents(
+    query=user_input,
+    top_k=4,
+    corp_code=corp_code,  # 회사가 특정된 경우에만 전달
+)
+```
+
+각 결과는 `content`, `metadata`, `similarity`를 포함합니다. `metadata`에는 문서
+제목, 공시 원문 URL, 회사 고유번호, 섹션명이 들어가므로 최종 답변의 출처 표시에
+사용할 수 있습니다.
 
 ## 🧠 아키텍처 흐름
 
