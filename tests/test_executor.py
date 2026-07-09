@@ -1,15 +1,25 @@
 from app.repositories import disclosure, news, price, watchlist
+from app.schemas.tool_results import (
+    DisclosureResult,
+    NewsResult,
+    StockPriceResult,
+    WatchlistResult,
+)
 from app.tools.executor import ToolExecutor
+from tests.fixtures.tool_responses import (
+    directional_news_item,
+    disclosure_item,
+    stock_snapshot,
+    watchlist_item,
+)
 
 
 async def test_executor_connects_stock_price_repository(monkeypatch):
     async def fake_snapshot(ticker: str, *, period: str):
-        return {
-            "ticker": "005930",
-            "name": ticker,
-            "period": period,
-            "current_price": 71000,
-        }
+        result = stock_snapshot()
+        result["name"] = ticker
+        result["period"] = period
+        return result
 
     monkeypatch.setattr(price, "get_stock_snapshot", fake_snapshot)
 
@@ -21,22 +31,14 @@ async def test_executor_connects_stock_price_repository(monkeypatch):
     assert result["success"] is True
     assert result["data"]["ticker"] == "005930"
     assert result["data"]["period"] == "1m"
+    StockPriceResult.model_validate(result)
 
 
 async def test_executor_connects_directional_news_repository(monkeypatch):
     async def fake_issue_news(company: str, **kwargs):
         assert company == "삼성전자"
         assert kwargs["direction"] == "down"
-        return [
-            {
-                "title": "삼성전자 실적 우려에 주가 급락",
-                "description": "영업이익 감소 우려",
-                "source_domain": "example.com",
-                "original_link": "https://example.com/down",
-                "direction_keywords": ["급락", "우려"],
-                "has_direction_evidence": True,
-            }
-        ]
+        return [directional_news_item()]
 
     monkeypatch.setattr(news, "get_stock_issue_news", fake_issue_news)
 
@@ -49,19 +51,14 @@ async def test_executor_connects_directional_news_repository(monkeypatch):
     assert item["sentiment"] == "악재"
     assert item["url"] == "https://example.com/down"
     assert item["reason"] == "급락, 우려"
+    NewsResult.model_validate(result)
 
 
 async def test_executor_connects_disclosure_repository(monkeypatch):
     async def fake_disclosures(corp: str, limit: int):
         assert corp == "005930"
         assert limit == 3
-        return [
-            {
-                "report_name": "사업보고서",
-                "received_date": "20260317",
-                "source_url": "https://dart.example/report",
-            }
-        ]
+        return [disclosure_item()]
 
     monkeypatch.setattr(disclosure, "get_recent_disclosures", fake_disclosures)
 
@@ -71,8 +68,9 @@ async def test_executor_connects_disclosure_repository(monkeypatch):
     )
 
     item = result["data"]["disclosures"][0]
-    assert item["title"] == "사업보고서"
+    assert item["title"] == "사업보고서 (2025.12)"
     assert item["date"] == "20260317"
+    DisclosureResult.model_validate(result)
 
 
 async def test_executor_connects_watchlist_repository(monkeypatch):
@@ -80,7 +78,10 @@ async def test_executor_connects_watchlist_repository(monkeypatch):
         return "005930"
 
     async def fake_add_watchlist(**kwargs):
-        return {**kwargs, "saved": True}
+        item = watchlist_item()
+        assert item["ticker"] == kwargs["ticker"]
+        assert item["session_id"] == kwargs["session_id"]
+        return item
 
     monkeypatch.setattr(price, "resolve_ticker", fake_resolve_ticker)
     monkeypatch.setattr(watchlist, "add_watchlist", fake_add_watchlist)
@@ -94,6 +95,7 @@ async def test_executor_connects_watchlist_repository(monkeypatch):
     assert result["success"] is True
     assert result["data"]["ticker"] == "005930"
     assert result["data"]["session_id"] == "session-1"
+    WatchlistResult.model_validate(result)
 
 
 async def test_executor_returns_structured_error(monkeypatch):
