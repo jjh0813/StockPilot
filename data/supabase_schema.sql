@@ -63,3 +63,16 @@ alter table public.documents enable row level security;
 
 -- 적재 스크립트는 backend 전용 service-role 키를 사용합니다.
 -- 프론트엔드에서 직접 읽어야 할 때만 별도의 SELECT 정책을 추가하세요.
+
+create table if not exists public.watchlists (
+  id bigserial primary key,
+  session_id text not null,
+  ticker text not null,
+  name text,
+  created_at timestamptz not null default now(),
+  unique (session_id, ticker)
+);
+
+alter table public.watchlists enable row level security;
+
+-- 관심 종목 저장도 backend의 service-role 키를 통해서만 수행합니다.

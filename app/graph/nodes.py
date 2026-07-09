@@ -47,7 +47,22 @@ async def tool_node(state: StockPilotState) -> dict:
     """도구를 실행해 종목 데이터를 수집한다."""
     ticker = state.get("ticker") or ""
     price = await _executor.execute("get_stock_price", {"ticker": ticker})
-    news = await _executor.execute("get_news", {"company": ticker})
+    user_text = _last_user_text(state)
+    change_pct = (price.get("data") or {}).get("change_pct")
+    if any(keyword in user_text for keyword in ("떨어", "하락", "급락", "약세")):
+        direction = "down"
+    elif any(keyword in user_text for keyword in ("올라", "상승", "급등", "강세")):
+        direction = "up"
+    elif change_pct is not None and change_pct <= -0.5:
+        direction = "down"
+    elif change_pct is not None and change_pct >= 0.5:
+        direction = "up"
+    else:
+        direction = "neutral"
+    news = await _executor.execute(
+        "get_news",
+        {"company": ticker, "direction": direction},
+    )
     news_items = news.get("data", {}).get("news", [])
     logger.info(f"🔧 [Tool] 수집 완료 | 뉴스 {len(news_items)}건")
     return {

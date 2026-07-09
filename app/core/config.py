@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # ── 공시 (OpenDART) ───────────────────────
     dart_api_key: str | None = None
 
+    # pykrx 재무지표·임의 종목명 검색에 사용하는 KRX 로그인
+    krx_id: str | None = None
+    krx_pw: str | None = None
+
     # ── RAG / 저장 (Supabase) ─────────────────
     supabase_url: str | None = None
     supabase_key: str | None = None
