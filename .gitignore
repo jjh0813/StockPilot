@@ -40,3 +40,6 @@ data/rag/
 Thumbs.db
 .idea/
 .vscode/
+
+# 로컬 전용 — 발표 준비 노트(깃 제외)
+docs/발표노트.md
