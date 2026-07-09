@@ -32,6 +32,7 @@ frontend/.vite/
 # ===== 데이터 캐시 / 임시 산출물 =====
 *.log
 data/cache/
+data/rag/
 *.snapshot.json
 
 # ===== OS / 에디터 =====

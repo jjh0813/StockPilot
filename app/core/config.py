@@ -32,9 +32,11 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
-    # ── LLM (Upstage Solar) ───────────────────
+    # ── LLM / 임베딩 (Upstage Solar) ───────────
     upstage_api_key: str | None = None
     llm_model: str = "solar-pro3"
+    embedding_model: str = "solar-embedding-1-large"
+    embedding_dimension: int = 4096
 
     # ── 뉴스 (네이버 검색 API) ─────────────────
     naver_client_id: str | None = None
@@ -46,6 +48,9 @@ class Settings(BaseSettings):
     # ── RAG / 저장 (Supabase) ─────────────────
     supabase_url: str | None = None
     supabase_key: str | None = None
+    rag_chunk_size: int = 1600
+    rag_chunk_overlap: int = 200
+    rag_embedding_batch_size: int = 16
 
 
 @lru_cache

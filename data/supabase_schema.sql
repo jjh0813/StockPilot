@@ -1,0 +1,65 @@
+-- StockPilot RAG schema
+-- Supabase SQL Editor에서 한 번 실행합니다.
+
+create extension if not exists vector;
+
+create table if not exists public.documents (
+  id bigserial primary key,
+  source_id text,
+  chunk_index integer,
+  content text not null,
+  embedding vector(4096),
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- 실습용 documents 테이블이 이미 존재하는 경우에도 안전하게 열을 추가합니다.
+alter table public.documents add column if not exists source_id text;
+alter table public.documents add column if not exists chunk_index integer;
+alter table public.documents add column if not exists updated_at timestamptz default now();
+
+create unique index if not exists documents_source_chunk_idx
+  on public.documents (source_id, chunk_index);
+
+create index if not exists documents_metadata_idx
+  on public.documents using gin (metadata);
+
+create or replace function public.match_documents(
+  query_embedding vector(4096),
+  match_count integer default 4,
+  match_threshold float default 0.45,
+  filter_corp_code text default null,
+  filter_source_type text default null
+)
+returns table (
+  id bigint,
+  content text,
+  metadata jsonb,
+  similarity float
+)
+language sql
+stable
+as $$
+  select
+    d.id,
+    d.content,
+    d.metadata,
+    (1 - (d.embedding <=> query_embedding))::float as similarity
+  from public.documents d
+  where
+    d.embedding is not null
+    and (filter_corp_code is null or d.metadata->>'corp_code' = filter_corp_code)
+    and (
+      filter_source_type is null
+      or d.metadata->>'source_type' = filter_source_type
+    )
+    and 1 - (d.embedding <=> query_embedding) >= match_threshold
+  order by d.embedding <=> query_embedding
+  limit least(greatest(match_count, 1), 50);
+$$;
+
+alter table public.documents enable row level security;
+
+-- 적재 스크립트는 backend 전용 service-role 키를 사용합니다.
+-- 프론트엔드에서 직접 읽어야 할 때만 별도의 SELECT 정책을 추가하세요.

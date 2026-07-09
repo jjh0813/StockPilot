@@ -1,5 +1,343 @@
-"""RAG 검색 (Supabase pgvector) — 투자 용어 사전·사업보고서."""
+"""RAG 문서 청킹·임베딩·Supabase pgvector 검색."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+from langchain_upstage import UpstageEmbeddings
+from loguru import logger
+from pypdf import PdfReader
+
+from app.core.config import settings
+from app.repositories import get_supabase_client
+
+_HEADING_RE = re.compile(
+    r"^(?:제\s*\d+\s*[장절]\b|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\.\s*|"
+    r"[IVX]{1,8}\.\s+|\d{1,2}\.\s+\S|[가-하]\.\s+\S)"
+)
+_KNOWN_HEADINGS = (
+    "회사의 개요",
+    "사업의 내용",
+    "사업의 개요",
+    "주요 제품 및 서비스",
+    "위험요인",
+    "위험 요인",
+    "재무에 관한 사항",
+)
 
 
-async def search_documents(query: str, top_k: int = 4):
-    ...  # TODO: 임베딩 후 유사 문단 검색
+def get_embeddings() -> UpstageEmbeddings:
+    if not settings.upstage_api_key:
+        raise RuntimeError("UPSTAGE_API_KEY가 필요합니다.")
+    return UpstageEmbeddings(
+        api_key=settings.upstage_api_key,
+        model=settings.embedding_model,
+    )
+
+
+def chunk_document(
+    content: str,
+    *,
+    chunk_size: int | None = None,
+    chunk_overlap: int | None = None,
+) -> list[dict]:
+    """공시의 장·절 제목을 보존하면서 본문을 문자 단위로 청킹합니다."""
+    chunk_size = chunk_size or settings.rag_chunk_size
+    chunk_overlap = (
+        settings.rag_chunk_overlap if chunk_overlap is None else chunk_overlap
+    )
+    if chunk_size <= 0:
+        raise ValueError("chunk_size는 양수여야 합니다.")
+    if chunk_overlap < 0 or chunk_overlap >= chunk_size:
+        raise ValueError("chunk_overlap은 0 이상 chunk_size 미만이어야 합니다.")
+
+    sections = _split_sections(_normalize_text(content))
+    chunks: list[dict] = []
+    for section, lines in sections:
+        section_text = "\n".join(lines).strip()
+        start = 0
+        while start < len(section_text):
+            end = min(start + chunk_size, len(section_text))
+            if end < len(section_text):
+                boundary = max(
+                    section_text.rfind("\n", start, end),
+                    section_text.rfind("다. ", start, end),
+                    section_text.rfind(". ", start, end),
+                )
+                if boundary > start + chunk_size // 2:
+                    end = boundary + (2 if section_text[boundary : boundary + 2] == "다." else 1)
+            piece = section_text[start:end].strip()
+            if piece:
+                chunks.append(_make_chunk(len(chunks), section, piece))
+            if end >= len(section_text):
+                break
+            start = max(end - chunk_overlap, start + 1)
+
+    chunks = _merge_small_chunks(chunks, chunk_size=chunk_size)
+    if not chunks:
+        raise ValueError("청크로 만들 수 있는 본문이 없습니다.")
+    return chunks
+
+
+def load_local_document(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        reader = PdfReader(str(path))
+        return _normalize_text(
+            "\n".join(page.extract_text() or "" for page in reader.pages)
+        )
+    if suffix in {".txt", ".md"}:
+        return _normalize_text(path.read_text(encoding="utf-8"))
+    raise ValueError(f"지원하지 않는 파일 형식입니다: {suffix}")
+
+
+def load_glossary(path: Path) -> list[dict]:
+    entries = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(entries, list):
+        raise ValueError("glossary.json 최상위 값은 배열이어야 합니다.")
+    required = {"term", "definition"}
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict) or not required.issubset(entry):
+            raise ValueError(f"용어 {index}에 term 또는 definition이 없습니다.")
+    return entries
+
+
+async def ingest_glossary(path: Path) -> int:
+    entries = load_glossary(path)
+    chunks = []
+    for index, entry in enumerate(entries):
+        aliases = ", ".join(entry.get("aliases", []))
+        content = f"용어: {entry['term']}\n뜻: {entry['definition']}"
+        if aliases:
+            content += f"\n비슷한 표현: {aliases}"
+        if entry.get("example"):
+            content += f"\n초보자 예시: {entry['example']}"
+        chunks.append(
+            {
+                "chunk_index": index,
+                "section": entry["term"],
+                "content": content,
+                "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+                "metadata": {
+                    "term": entry["term"],
+                    "aliases": entry.get("aliases", []),
+                    "source_url": entry.get("source_url"),
+                },
+            }
+        )
+    return await save_chunks(
+        source_id="glossary:v1",
+        chunks=chunks,
+        base_metadata={
+            "source_type": "glossary",
+            "title": "초보 투자자를 위한 투자 용어 사전",
+            "status": "active",
+        },
+    )
+
+
+async def ingest_text_document(
+    *,
+    source_id: str,
+    content: str,
+    metadata: dict[str, Any],
+) -> int:
+    chunks = chunk_document(content)
+    return await save_chunks(
+        source_id=source_id,
+        chunks=chunks,
+        base_metadata=metadata,
+    )
+
+
+async def save_chunks(
+    *,
+    source_id: str,
+    chunks: list[dict],
+    base_metadata: dict[str, Any],
+) -> int:
+    embeddings = get_embeddings()
+    texts = [chunk["content"] for chunk in chunks]
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), settings.rag_embedding_batch_size):
+        vectors.extend(
+            await embeddings.aembed_documents(
+                texts[start : start + settings.rag_embedding_batch_size]
+            )
+        )
+    if vectors and len(vectors[0]) != settings.embedding_dimension:
+        raise RuntimeError(
+            "임베딩 차원 불일치: "
+            f"expected={settings.embedding_dimension}, actual={len(vectors[0])}"
+        )
+
+    rows = [
+        {
+            "source_id": source_id,
+            "chunk_index": chunk["chunk_index"],
+            "content": chunk["content"],
+            "embedding": vector,
+            "metadata": {
+                **base_metadata,
+                **chunk.get("metadata", {}),
+                "section": chunk["section"],
+                "content_hash": chunk["content_hash"],
+            },
+        }
+        for chunk, vector in zip(chunks, vectors, strict=True)
+    ]
+    client = await get_supabase_client()
+    for start in range(0, len(rows), 50):
+        await (
+            client.table("documents")
+            .upsert(
+                rows[start : start + 50],
+                on_conflict="source_id,chunk_index",
+            )
+            .execute()
+        )
+    await (
+        client.table("documents")
+        .delete()
+        .eq("source_id", source_id)
+        .gte("chunk_index", len(rows))
+        .execute()
+    )
+    logger.info(f"RAG 적재 완료: source_id={source_id}, chunks={len(rows)}")
+    return len(rows)
+
+
+async def search_documents(
+    query: str,
+    top_k: int = 4,
+    *,
+    corp_code: str | None = None,
+    source_type: str | None = None,
+    threshold: float = 0.45,
+) -> list[dict]:
+    """팀원 A의 rag_node가 호출할 검색 인터페이스."""
+    if not query.strip():
+        return []
+    query_embedding = await get_embeddings().aembed_query(query)
+    client = await get_supabase_client()
+    result = await client.rpc(
+        "match_documents",
+        {
+            "query_embedding": query_embedding,
+            "match_count": top_k,
+            "match_threshold": threshold,
+            "filter_corp_code": corp_code,
+            "filter_source_type": source_type,
+        },
+    ).execute()
+    return result.data or []
+
+
+class RAGRepository:
+    async def search_similar(
+        self,
+        query: str,
+        *,
+        k: int = 4,
+        corp_code: str | None = None,
+        source_type: str | None = None,
+        threshold: float = 0.45,
+    ) -> list[dict]:
+        return await search_documents(
+            query,
+            top_k=k,
+            corp_code=corp_code,
+            source_type=source_type,
+            threshold=threshold,
+        )
+
+
+_rag_repository: RAGRepository | None = None
+
+
+def get_rag_repository() -> RAGRepository:
+    global _rag_repository
+    if _rag_repository is None:
+        _rag_repository = RAGRepository()
+    return _rag_repository
+
+
+def _normalize_text(text: str) -> str:
+    lines: list[str] = []
+    previous = ""
+    for raw_line in text.replace("\u00a0", " ").replace("\u200b", "").splitlines():
+        line = re.sub(r"[ \t]+", " ", raw_line).strip()
+        if not line or line == previous or re.fullmatch(r"-?\s*\d+\s*-?", line):
+            continue
+        lines.append(line)
+        previous = line
+    return "\n".join(lines)
+
+
+def _is_heading(line: str) -> bool:
+    if len(line) > 100:
+        return False
+    compact = line.replace(" ", "")
+    return bool(_HEADING_RE.match(line)) or any(
+        heading.replace(" ", "") in compact for heading in _KNOWN_HEADINGS
+    )
+
+
+def _split_sections(text: str) -> list[tuple[str, list[str]]]:
+    sections: list[tuple[str, list[str]]] = []
+    title = "본문"
+    lines: list[str] = []
+    for line in text.splitlines():
+        if _is_heading(line):
+            if lines:
+                sections.append((title, lines))
+            title = line[:100]
+            lines = []
+        else:
+            lines.append(line)
+    if lines:
+        sections.append((title, lines))
+    return sections or [("본문", text.splitlines())]
+
+
+def _make_chunk(index: int, section: str, content: str) -> dict:
+    return {
+        "chunk_index": index,
+        "section": section,
+        "content": content,
+        "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+        "metadata": {},
+    }
+
+
+def _merge_small_chunks(chunks: list[dict], *, chunk_size: int) -> list[dict]:
+    merged: list[dict] = []
+    for chunk in chunks:
+        if (
+            merged
+            and len(merged[-1]["content"]) < 80
+            and len(merged[-1]["content"]) + len(chunk["content"]) + 1 <= chunk_size
+        ):
+            prefix = merged.pop()["content"]
+            chunk["content"] = f"{prefix}\n{chunk['content']}"
+            chunk["content_hash"] = hashlib.sha256(
+                chunk["content"].encode()
+            ).hexdigest()
+        elif (
+            merged
+            and len(chunk["content"]) < 80
+            and len(merged[-1]["content"]) + len(chunk["content"]) + 1 <= chunk_size
+        ):
+            merged[-1]["content"] += f"\n{chunk['content']}"
+            merged[-1]["content_hash"] = hashlib.sha256(
+                merged[-1]["content"].encode()
+            ).hexdigest()
+            continue
+        merged.append(chunk)
+    for index, chunk in enumerate(merged):
+        chunk["chunk_index"] = index
+    return merged

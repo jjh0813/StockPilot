@@ -1,1 +1,86 @@
-[]
+[
+  {
+    "term": "PER",
+    "aliases": ["주가수익비율", "Price Earnings Ratio"],
+    "definition": "현재 주가가 주당순이익(EPS)의 몇 배인지 보여주는 지표입니다. 같은 업종의 기업끼리 비교할 때 주로 참고하지만, PER이 낮다는 사실만으로 저평가라고 단정할 수는 없습니다.",
+    "example": "PER이 10배라면 현재 주가가 최근 주당순이익의 약 10배 수준이라는 뜻입니다.",
+    "source_url": "https://kind.krx.co.kr/external/dst/guidebook/investment_indicators.pdf"
+  },
+  {
+    "term": "PBR",
+    "aliases": ["주가순자산비율", "Price Book-value Ratio"],
+    "definition": "현재 주가가 주당순자산(BPS)의 몇 배인지 보여주는 지표입니다. 자산 구조가 다른 기업끼리는 단순 비교하기 어렵고, 1배 미만이라고 반드시 싸다는 뜻은 아닙니다.",
+    "example": "PBR이 1배라면 주가와 주당순자산이 비슷한 수준이라는 의미입니다.",
+    "source_url": "https://kind.krx.co.kr/external/dst/guidebook/investment_indicators.pdf"
+  },
+  {
+    "term": "ROE",
+    "aliases": ["자기자본이익률", "Return on Equity"],
+    "definition": "회사가 주주가 맡긴 자기자본을 이용해 어느 정도의 이익을 냈는지 보여주는 비율입니다. 일회성 이익이나 부채 규모의 영향을 함께 확인해야 합니다.",
+    "example": "ROE 10%는 자기자본 100원으로 일정 기간 약 10원의 이익을 냈다는 식으로 이해할 수 있습니다.",
+    "source_url": "https://kind.krx.co.kr/external/dst/guidebook/investment_indicators.pdf"
+  },
+  {
+    "term": "EPS",
+    "aliases": ["주당순이익", "Earnings Per Share"],
+    "definition": "기업의 순이익을 주식 수로 나눈 값으로, 주식 한 주가 벌어들인 이익을 나타냅니다. PER 계산에도 사용됩니다.",
+    "example": "EPS가 5,000원이면 계산상 한 주당 5,000원의 순이익을 냈다는 의미입니다.",
+    "source_url": "https://kind.krx.co.kr/external/dst/guidebook/investment_indicators.pdf"
+  },
+  {
+    "term": "BPS",
+    "aliases": ["주당순자산", "Book-value Per Share"],
+    "definition": "기업의 순자산을 주식 수로 나눈 값입니다. 회계상 자산가치를 한 주 기준으로 본 지표이며 PBR 계산에 사용됩니다.",
+    "example": "BPS가 50,000원이라는 것은 회계상 순자산을 주식 수로 나누면 한 주당 50,000원 수준이라는 뜻입니다.",
+    "source_url": "https://kind.krx.co.kr/external/dst/guidebook/investment_indicators.pdf"
+  },
+  {
+    "term": "배당수익률",
+    "aliases": ["Dividend Yield"],
+    "definition": "주당배당금을 기준 주가로 나눈 비율입니다. 실제 배당금은 회사의 실적과 배당정책에 따라 달라질 수 있습니다.",
+    "example": "주가가 10만 원이고 연간 주당배당금이 3천 원이면 단순 배당수익률은 약 3%입니다.",
+    "source_url": "https://kind.krx.co.kr/external/dst/guidebook/investment_indicators.pdf"
+  },
+  {
+    "term": "시가총액",
+    "aliases": ["시총", "Market Capitalization"],
+    "definition": "현재 주가에 상장 주식 수를 곱한 값으로, 주식시장이 평가하는 회사 전체의 규모를 나타냅니다.",
+    "example": "주가 5만 원인 주식이 1억 주 발행되어 있다면 시가총액은 약 5조 원입니다.",
+    "source_url": "https://data.krx.co.kr/"
+  },
+  {
+    "term": "사업보고서",
+    "aliases": ["정기보고서", "Annual Report"],
+    "definition": "회사가 사업 내용, 재무 상태, 주요 위험, 주주와 임원 정보 등을 정기적으로 공시하는 문서입니다. 투자 판단에서는 요약 기사보다 원문과 제출 시점을 함께 확인하는 것이 중요합니다.",
+    "example": "회사의 주요 제품이나 위험 요인을 확인할 때 최근 사업보고서의 '사업의 내용'과 '위험요인' 부분을 살펴볼 수 있습니다.",
+    "source_url": "https://opendart.fss.or.kr/guide/main.do?apiGrpCd=DS001"
+  },
+  {
+    "term": "유상증자",
+    "aliases": ["Paid-in Capital Increase"],
+    "definition": "회사가 대가를 받고 새 주식을 발행해 자금을 조달하는 방식입니다. 회사는 자금을 확보하지만 발행 조건에 따라 기존 주주의 지분이 희석될 수 있으므로 자금 사용 목적과 발행 가격을 함께 봐야 합니다.",
+    "example": "공장 건설을 위한 유상증자와 빚 상환을 위한 유상증자는 시장이 받아들이는 의미가 다를 수 있습니다.",
+    "source_url": "https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS005&apiId=2020023"
+  },
+  {
+    "term": "전환사채",
+    "aliases": ["CB", "Convertible Bond"],
+    "definition": "처음에는 채권이지만 정해진 조건에 따라 회사 주식으로 바꿀 수 있는 권리가 붙은 증권입니다. 전환이 이뤄지면 주식 수가 늘어 기존 주주의 지분이 희석될 수 있습니다.",
+    "example": "전환가격, 전환 가능 기간, 발행 목적을 확인해야 실제 영향을 이해할 수 있습니다.",
+    "source_url": "https://dart.fss.or.kr/info/main.do?menu=320"
+  },
+  {
+    "term": "주식 희석",
+    "aliases": ["지분 희석", "Dilution"],
+    "definition": "새 주식이 발행되면서 기존 주주가 가진 지분율이나 주당 가치가 낮아질 가능성을 말합니다. 유상증자나 전환사채의 주식 전환 때 발생할 수 있습니다.",
+    "example": "전체 주식 수가 100주에서 120주로 늘고 기존 주주가 그대로 10주를 보유한다면 지분율은 10%에서 약 8.3%로 낮아집니다.",
+    "source_url": "https://opendart.fss.or.kr/guide/main.do?apiGrpCd=DS001"
+  },
+  {
+    "term": "영업이익",
+    "aliases": ["Operating Profit"],
+    "definition": "회사의 주된 영업활동에서 매출액과 영업비용을 반영하고 남은 이익입니다. 금융손익이나 법인세 등 영업 외 항목을 반영한 당기순이익과는 다릅니다.",
+    "example": "매출이 늘어도 원재료비나 인건비가 더 크게 증가하면 영업이익은 줄어들 수 있습니다.",
+    "source_url": "https://opendart.fss.or.kr/disclosureinfo/fnltt/cmpnyacnt/main.do"
+  }
+]
