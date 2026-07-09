@@ -215,6 +215,15 @@ SSE 스트리밍으로 실시간 응답
 3. **LLM 선별·분류** — 후보 뉴스를 Solar로 '주가 영향 여부' 판정 + 호재/악재/중립 분류 + 근거 추출
 4. **종합(리즈닝)** — 선별된 뉴스·공시를 묶어 최근 가격 흐름과 연관 이슈를 정리 (인과 단정 금지)
 
+최신 뉴스 수집만 확인하려면 다음 명령을 사용합니다.
+
+```bash
+uv run python data/scripts/fetch_news.py --company 삼성전자 --days 7 --limit 10
+
+# "삼성전자 왜 떨어짐?" 같은 질문의 하락 이슈 후보 확인
+uv run python data/scripts/fetch_news.py --company 삼성전자 --direction down
+```
+
 ---
 
 ## 🌐 API 엔드포인트 (목표)
