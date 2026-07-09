@@ -87,7 +87,9 @@ def chunk_document(
                     section_text.rfind(". ", start, end),
                 )
                 if boundary > start + chunk_size // 2:
-                    end = boundary + (2 if section_text[boundary : boundary + 2] == "다." else 1)
+                    end = boundary + (
+                        2 if section_text[boundary : boundary + 2] == "다." else 1
+                    )
             piece = section_text[start:end].strip()
             if piece:
                 chunks.append(_make_chunk(len(chunks), section, piece))
@@ -310,8 +312,7 @@ async def _embed_batch_with_retry(
             if attempt == attempts:
                 raise
             logger.warning(
-                f"임베딩 배치 실패({type(exc).__name__}), "
-                f"{attempt}/{attempts}회 재시도"
+                f"임베딩 배치 실패({type(exc).__name__}), {attempt}/{attempts}회 재시도"
             )
             await asyncio.sleep(2 ** (attempt - 1))
     raise RuntimeError("임베딩 재시도 횟수를 초과했습니다.")
@@ -385,10 +386,11 @@ def _normalize_text(text: str) -> str:
 
 
 def _is_heading(line: str) -> bool:
-    if len(line) > 100:
+    normalized = re.sub(r"^#{1,6}\s*", "", line).strip()
+    if len(normalized) > 100:
         return False
-    compact = line.replace(" ", "")
-    return bool(_HEADING_RE.match(line)) or any(
+    compact = normalized.replace(" ", "")
+    return bool(_HEADING_RE.match(normalized)) or any(
         heading.replace(" ", "") in compact for heading in _KNOWN_HEADINGS
     )
 
@@ -401,7 +403,7 @@ def _split_sections(text: str) -> list[tuple[str, list[str]]]:
         if _is_heading(line):
             if lines:
                 sections.append((title, lines))
-            title = line[:100]
+            title = re.sub(r"^#{1,6}\s*", "", line).strip()[:100]
             lines = []
         else:
             lines.append(line)

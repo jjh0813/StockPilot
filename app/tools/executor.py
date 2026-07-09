@@ -9,6 +9,8 @@ from typing import Any, Literal
 from loguru import logger
 
 from app.repositories import disclosure, news, price, watchlist
+from app.schemas.tool_results import TOOL_RESULT_SCHEMAS, ToolErrorResult
+from app.schemas.tools import TOOL_ARG_SCHEMAS
 
 DEFAULT_UNIVERSE = [
     "삼성전자",
@@ -37,30 +39,41 @@ class ToolExecutor:
         args = dict(tool_args or {})
         logger.info(f"🔧 [Tool] 실행: {tool_name} | args={args}")
         try:
+            if tool_name not in TOOL_ARG_SCHEMAS:
+                logger.warning(f"⚠️ [Tool] 알 수 없는 도구: {tool_name}")
+                return ToolErrorResult(
+                    error=f"알 수 없는 도구: {tool_name}",
+                ).model_dump(exclude_none=True)
+            schema = TOOL_ARG_SCHEMAS[tool_name]
+            validated_args = schema.model_validate(args).model_dump(
+                exclude_none=True,
+            )
+
             match tool_name:
                 case "get_stock_price":
-                    result = await self.get_stock_price(**args)
+                    result = await self.get_stock_price(**validated_args)
                 case "get_news":
-                    result = await self.get_news(**args)
+                    result = await self.get_news(**validated_args)
                 case "get_disclosure":
-                    result = await self.get_disclosure(**args)
+                    result = await self.get_disclosure(**validated_args)
                 case "find_positive_news_stocks":
-                    result = await self.find_positive_news_stocks(**args)
+                    result = await self.find_positive_news_stocks(**validated_args)
                 case "add_watchlist":
-                    result = await self.add_watchlist(session_id=session_id, **args)
-                case _:
-                    logger.warning(f"⚠️ [Tool] 알 수 없는 도구: {tool_name}")
-                    return {
-                        "success": False,
-                        "error": f"알 수 없는 도구: {tool_name}",
-                    }
+                    result = await self.add_watchlist(
+                        session_id=session_id,
+                        **validated_args,
+                    )
+            result = (
+                TOOL_RESULT_SCHEMAS[tool_name]
+                .model_validate(result)
+                .model_dump(mode="json")
+            )
         except Exception as exc:
             logger.exception(f"도구 실행 실패: tool={tool_name}")
-            return {
-                "success": False,
-                "error": str(exc),
-                "error_type": type(exc).__name__,
-            }
+            return ToolErrorResult(
+                error=str(exc),
+                error_type=type(exc).__name__,
+            ).model_dump(exclude_none=True)
 
         logger.info(f"✅ [Tool] 완료: {tool_name} | success={result.get('success')}")
         return result
@@ -222,6 +235,17 @@ def _normalize_news_item(
     reason_keywords = (
         result.get("direction_keywords") or result.get("matched_keywords") or []
     )
+    result.setdefault("relevance_score", 0)
+    result.setdefault("matched_keywords", [])
+    result.setdefault("direct_company_match", False)
+    result.setdefault("company_mentioned", False)
+    result.setdefault("market_context_match", False)
+    result.setdefault("direction", direction)
+    result.setdefault("direction_keywords", [])
+    result.setdefault("opposite_direction_keywords", [])
+    result.setdefault("has_direction_evidence", False)
+    result.setdefault("issue_score", result["relevance_score"])
+    result.setdefault("ranking_tier", 0)
     result.update(
         {
             "source": result.get("source_domain", ""),

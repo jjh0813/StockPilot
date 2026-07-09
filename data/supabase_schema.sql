@@ -76,3 +76,19 @@ create table if not exists public.watchlists (
 alter table public.watchlists enable row level security;
 
 -- 관심 종목 저장도 backend의 service-role 키를 통해서만 수행합니다.
+
+create table if not exists public.document_facts (
+  id bigserial primary key,
+  source_id text not null unique,
+  facts jsonb not null default '{}'::jsonb,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists document_facts_metadata_idx
+  on public.document_facts using gin (metadata);
+
+alter table public.document_facts enable row level security;
+
+-- Information Extract 결과도 backend의 service-role 키로만 저장합니다.

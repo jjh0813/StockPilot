@@ -6,6 +6,10 @@
 사업보고서 확인/적재:
     uv run python data/scripts/ingest_rag.py fetch-dart --company 삼성전자
     uv run python data/scripts/ingest_rag.py ingest-dart --company 삼성전자
+
+Upstage Document AI 파일 적재:
+    uv run python data/scripts/ingest_rag.py prepare-file \
+      --path report.pdf --parser upstage --business-report --extract-facts
 """
 
 from __future__ import annotations
@@ -27,8 +31,11 @@ from app.repositories.rag import (  # noqa: E402
     chunk_document,
     ingest_business_report,
     ingest_glossary,
-    ingest_text_document,
-    load_local_document,
+    select_business_report_chunks,
+)
+from app.services.document_ingestion import (  # noqa: E402
+    ingest_document,
+    prepare_document,
 )
 
 DEFAULT_GLOSSARY = PROJECT_ROOT / "data" / "glossary.json"
@@ -60,6 +67,7 @@ def parse_args() -> argparse.Namespace:
     )
     prepare_file.add_argument("--path", type=Path, required=True)
     prepare_file.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    _add_document_ai_options(prepare_file)
 
     ingest_file = commands.add_parser(
         "ingest-file",
@@ -68,6 +76,7 @@ def parse_args() -> argparse.Namespace:
     ingest_file.add_argument("--path", type=Path, required=True)
     ingest_file.add_argument("--source-id")
     ingest_file.add_argument("--title")
+    _add_document_ai_options(ingest_file)
     return parser.parse_args()
 
 
@@ -117,37 +126,84 @@ async def main_async(args: argparse.Namespace) -> None:
         return
 
     if command in {"prepare-file", "ingest-file"}:
-        content = load_local_document(args.path)
+        use_upstage = args.parser == "upstage"
+        metadata = {
+            "source_type": "local",
+            "status": "active",
+            "title": getattr(args, "title", None) or args.path.stem,
+            "filename": args.path.name,
+        }
         if command == "ingest-file":
-            source_id = args.source_id or (
-                f"local:{args.path.resolve().as_posix()}"
-            )
-            saved = await ingest_text_document(
+            source_id = args.source_id or (f"local:{args.path.resolve().as_posix()}")
+            result = await ingest_document(
+                args.path,
                 source_id=source_id,
-                content=content,
-                metadata={
-                    "source_type": "local",
-                    "status": "active",
-                    "title": args.title or args.path.stem,
-                    "filename": args.path.name,
-                },
+                metadata=metadata,
+                document_type=(
+                    "business_report" if args.business_report else "general"
+                ),
+                use_upstage=use_upstage,
+                fallback_to_local=not args.no_fallback,
+                extract_facts=args.extract_facts,
             )
-            logger.success(f"로컬 문서 적재 완료: {saved} chunks")
+            logger.success(
+                "로컬 문서 적재 완료: "
+                f"{result.chunks_saved} chunks, parser={result.parser}, "
+                f"facts_saved={result.facts_saved}"
+            )
         else:
-            chunks = chunk_document(content)
+            prepared = await prepare_document(
+                args.path,
+                use_upstage=use_upstage,
+                fallback_to_local=not args.no_fallback,
+                extract_facts=args.extract_facts,
+            )
+            chunks = chunk_document(prepared.parsed.content)
+            if args.business_report:
+                chunks = select_business_report_chunks(chunks)
             target = _save_json(
                 {
                     "document": {
-                        "source_type": "local",
-                        "title": args.path.stem,
-                        "filename": args.path.name,
+                        **metadata,
+                        "parser": prepared.parsed.parser,
+                        "output_format": prepared.parsed.output_format,
+                        "page_count": prepared.parsed.page_count,
                     },
                     "chunks": chunks,
+                    "facts": (
+                        prepared.facts.model_dump(mode="json")
+                        if prepared.facts
+                        else None
+                    ),
                 },
                 args.output_dir,
                 f"{args.path.stem}.json",
             )
             logger.success(f"로컬 문서 저장 완료: {target} ({len(chunks)} chunks)")
+
+
+def _add_document_ai_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--parser",
+        choices=("upstage", "local"),
+        default="upstage",
+        help="PDF·이미지는 Upstage Document Parse 사용(기본값)",
+    )
+    parser.add_argument(
+        "--extract-facts",
+        action="store_true",
+        help="Upstage Information Extract로 사업보고서 핵심 필드 추출",
+    )
+    parser.add_argument(
+        "--business-report",
+        action="store_true",
+        help="사업 내용·위험 섹션 중심으로 청크 선별",
+    )
+    parser.add_argument(
+        "--no-fallback",
+        action="store_true",
+        help="Document Parse 실패 시 로컬 pypdf fallback을 사용하지 않음",
+    )
 
 
 def _save_json(payload: dict, output_dir: Path, filename: str) -> Path:
