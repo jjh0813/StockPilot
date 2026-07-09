@@ -47,7 +47,22 @@ async def tool_node(state: StockPilotState) -> dict:
     """도구를 실행해 종목 데이터를 수집한다."""
     ticker = state.get("ticker") or ""
     price = await _executor.execute("get_stock_price", {"ticker": ticker})
-    news = await _executor.execute("get_news", {"company": ticker})
+    user_text = _last_user_text(state)
+    change_pct = (price.get("data") or {}).get("change_pct")
+    if any(keyword in user_text for keyword in ("떨어", "하락", "급락", "약세")):
+        direction = "down"
+    elif any(keyword in user_text for keyword in ("올라", "상승", "급등", "강세")):
+        direction = "up"
+    elif change_pct is not None and change_pct <= -0.5:
+        direction = "down"
+    elif change_pct is not None and change_pct >= 0.5:
+        direction = "up"
+    else:
+        direction = "neutral"
+    news = await _executor.execute(
+        "get_news",
+        {"company": ticker, "direction": direction},
+    )
     news_items = news.get("data", {}).get("news", [])
     logger.info(f"🔧 [Tool] 수집 완료 | 뉴스 {len(news_items)}건")
     return {
@@ -58,22 +73,49 @@ async def tool_node(state: StockPilotState) -> dict:
     }
 
 
+def _format_change(change_pct: float | None) -> tuple[str, str]:
+    """등락률 → (화살표, 방향 단어)."""
+    if change_pct is None:
+        return "", ""
+    if change_pct > 0:
+        return "▲", "상승"
+    if change_pct < 0:
+        return "▼", "하락"
+    return "―", "보합"
+
+
 async def response_node(state: StockPilotState) -> dict:
-    """수집한 근거로 최종 응답을 생성한다."""
-    ticker = state.get("ticker") or "해당 종목"
+    """등락률과 그 원인 분석을 담은 최종 응답을 생성한다."""
+    price = state.get("price_data") or {}
     news_items = state.get("news_items") or []
     docs = state.get("retrieved_docs") or []
 
-    if news_items:
-        icons = {"호재": "🟢", "악재": "🔴"}
-        lines = [f"📊 {ticker} 최근 이슈"]
-        for item in news_items:
-            icon = icons.get(item.get("sentiment", ""), "⚪")
-            lines.append(f"{icon} {item.get('title', '')} ({item.get('source', '')})")
+    name = price.get("name") or state.get("ticker") or "해당 종목"
+    change_pct = price.get("change_pct")
+    current_price = price.get("current_price")
+
+    if change_pct is not None:
+        arrow, direction = _format_change(change_pct)
+        lines = [f"{name} {arrow} {abs(change_pct):.2f}% {direction}"]
+        if current_price is not None:
+            lines.append(f"현재가 {int(current_price):,}원")
+        lines.append("")
+        lines.append("📌 원인 분석")
+        if news_items:
+            subject = "움직임" if direction == "보합" else direction
+            lines.append(f"최근 {subject}은(는) 다음 이슈와 관련 있어 보입니다:")
+            for item in news_items[:5]:
+                title = item.get("title", "")
+                source = item.get("source_domain", "")
+                suffix = f" ({source})" if source else ""
+                lines.append(f" • {title}{suffix}")
+        else:
+            lines.append("관련 뉴스를 찾지 못했어요.")
+        lines.append("")
         lines.append("※ 투자 자문이 아닌 참고용 정보입니다.")
         answer = "\n".join(lines)
     elif docs:
-        answer = "\n".join(docs) + "\n※ 투자 자문이 아닌 참고용 정보입니다."
+        answer = "\n".join(docs) + "\n\n※ 투자 자문이 아닌 참고용 정보입니다."
     else:
         answer = "관련 정보를 찾지 못했어요. 종목명을 다시 알려주세요."
 
