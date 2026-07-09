@@ -5,6 +5,8 @@ tool 노드가 ToolExecutor.execute(tool_name, tool_args)를 단일 진입점으
 """
 from typing import Any
 
+from loguru import logger
+
 # 스크리너 기본 유니버스(10개)
 DEFAULT_UNIVERSE = [
     "삼성전자", "SK하이닉스", "LG에너지솔루션", "삼성바이오로직스", "현대차",
@@ -23,22 +25,29 @@ class ToolExecutor:
     ) -> dict[str, Any]:
         """도구 이름으로 분기해 실행하는 단일 진입점."""
         args = dict(tool_args or {})
+        logger.info(f"🔧 [Tool] 실행: {tool_name} | args={args}")
+
         match tool_name:
             case "get_stock_price":
-                return await self.get_stock_price(**args)
+                result = await self.get_stock_price(**args)
             case "get_news":
-                return await self.get_news(**args)
+                result = await self.get_news(**args)
             case "get_disclosure":
-                return await self.get_disclosure(**args)
+                result = await self.get_disclosure(**args)
             case "find_positive_news_stocks":
-                return await self.find_positive_news_stocks(**args)
+                result = await self.find_positive_news_stocks(**args)
             case "add_watchlist":
-                return await self.add_watchlist(session_id=session_id, **args)
+                result = await self.add_watchlist(session_id=session_id, **args)
             case _:
+                logger.warning(f"⚠️ [Tool] 알 수 없는 도구: {tool_name}")
                 return {"success": False, "error": f"알 수 없는 도구: {tool_name}"}
+
+        logger.info(f"✅ [Tool] 완료: {tool_name} | success={result.get('success')}")
+        return result
 
     async def get_stock_price(self, ticker: str, period: str = "3m") -> dict[str, Any]:
         """시세·등락률·일봉 조회."""
+        logger.debug(f"[get_stock_price] ticker={ticker}, period={period}")
         # TODO: repositories/price.py 연동
         return {"success": True, "data": {
             "ticker": ticker,
@@ -53,6 +62,7 @@ class ToolExecutor:
 
     async def get_news(self, company: str, days: int = 7) -> dict[str, Any]:
         """종목 관련 뉴스 조회(호재/악재 분류 포함)."""
+        logger.debug(f"[get_news] company={company}, days={days}")
         # TODO: repositories/news.py 연동
         return {"success": True, "data": {"news": [
             {
@@ -73,6 +83,7 @@ class ToolExecutor:
 
     async def get_disclosure(self, ticker: str) -> dict[str, Any]:
         """최근 공시 조회."""
+        logger.debug(f"[get_disclosure] ticker={ticker}")
         # TODO: repositories/disclosure.py 연동
         return {"success": True, "data": {"disclosures": [
             {"title": "분기보고서", "date": "2026-06-30", "url": "https://example.com/dart/1"},
@@ -83,6 +94,7 @@ class ToolExecutor:
     ) -> dict[str, Any]:
         """유니버스에서 최근 호재 뉴스가 많은 종목 선별."""
         uni = universe or DEFAULT_UNIVERSE
+        logger.debug(f"[find_positive_news_stocks] universe_size={len(uni)}")
         return {"success": True, "data": {"stocks": [
             {"ticker": uni[0], "positive_score": 0.8, "top_news": "실적 개선 기대"},
             {"ticker": uni[6], "positive_score": 0.6, "top_news": "신규 사업 진출"},
@@ -90,6 +102,7 @@ class ToolExecutor:
 
     async def add_watchlist(self, ticker: str, session_id: str) -> dict[str, Any]:
         """관심 종목 저장."""
+        logger.debug(f"[add_watchlist] ticker={ticker}, session_id={session_id}")
         # TODO: Supabase 연동
         return {"success": True, "data": {
             "ticker": ticker,
