@@ -1,0 +1,18 @@
+services:
+  stockpilot:
+    build:
+      context: .
+    image: stockpilot:local
+    container_name: stockpilot
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/api/v1/health/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

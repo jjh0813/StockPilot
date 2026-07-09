@@ -1,8 +1,12 @@
-"""FastAPI 진입점 — 앱 생성, 미들웨어, 라우터 등록, 서버 실행."""
+"""FastAPI entry point."""
+
 from fastapi import FastAPI
 
-# TODO: lifespan(그래프 싱글톤 로드), CORS 미들웨어, /api/v1 라우터 등록
+from app.api.routes import api_router
 
-app = FastAPI(title="StockPilot API")
+app = FastAPI(
+    title="StockPilot API",
+    version="0.1.0",
+)
 
-# TODO: app.include_router(api_router, prefix="/api/v1")
+app.include_router(api_router, prefix="/api/v1")

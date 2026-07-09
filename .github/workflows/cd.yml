@@ -1,0 +1,243 @@
+name: StockPilot CD
+
+# Repository secrets:
+# GCE_HOST, GCE_USERNAME, GCE_SSH_KEY
+# UPSTAGE_API_KEY, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, DART_API_KEY
+# KRX_ID, KRX_PW
+# SUPABASE_URL, SUPABASE_KEY
+# GITHUB_TOKEN is supplied automatically by GitHub Actions.
+
+on:
+  workflow_run:
+    workflows: ["StockPilot CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      rollback:
+        description: "Rollback to the previously deployed image"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: stockpilot-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  build-and-push:
+    name: Build and Push to GHCR
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && !inputs.rollback)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout deployed revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Normalize image name
+        id: image
+        shell: bash
+        run: |
+          IMAGE_NAME_LOWER="$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')"
+          echo "full_name=${{ env.REGISTRY }}/${IMAGE_NAME_LOWER}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.full_name }}:${{ env.DEPLOY_SHA }}
+            ${{ steps.image.outputs.full_name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to Compute Engine
+    needs: build-and-push
+    if: >-
+      always() &&
+      (needs.build-and-push.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && inputs.rollback))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy image
+        if: ${{ !inputs.rollback }}
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.GCE_HOST }}
+          username: ${{ secrets.GCE_USERNAME }}
+          key: ${{ secrets.GCE_SSH_KEY }}
+          script: |
+            set -eu
+
+            REGISTRY="ghcr.io"
+            IMAGE_NAME="$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')"
+            FULL_IMAGE="${REGISTRY}/${IMAGE_NAME}:${{ env.DEPLOY_SHA }}"
+            DEPLOY_DIR="/home/${{ secrets.GCE_USERNAME }}/stockpilot"
+
+            mkdir -p "$DEPLOY_DIR"
+            cd "$DEPLOY_DIR"
+
+            cat > docker-compose.yml <<'COMPOSE_EOF'
+            services:
+              stockpilot:
+                image: ${STOCKPILOT_IMAGE}
+                container_name: stockpilot
+                restart: unless-stopped
+                ports:
+                  - "8000:8000"
+                env_file:
+                  - .env
+                healthcheck:
+                  test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/api/v1/health/"]
+                  interval: 30s
+                  timeout: 5s
+                  retries: 3
+                  start_period: 10s
+            COMPOSE_EOF
+
+            cat > .env <<'ENV_EOF'
+            ENVIRONMENT=production
+            DEBUG=false
+            UPSTAGE_API_KEY=${{ secrets.UPSTAGE_API_KEY }}
+            LLM_MODEL=solar-pro3
+            EMBEDDING_MODEL=solar-embedding-1-large
+            EMBEDDING_DIMENSION=4096
+            NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}
+            NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}
+            DART_API_KEY=${{ secrets.DART_API_KEY }}
+            KRX_ID=${{ secrets.KRX_ID }}
+            KRX_PW=${{ secrets.KRX_PW }}
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
+            RAG_CHUNK_SIZE=1600
+            RAG_CHUNK_OVERLAP=200
+            RAG_EMBEDDING_BATCH_SIZE=16
+            ENV_EOF
+            chmod 600 .env
+
+            if docker compose version >/dev/null 2>&1; then
+              COMPOSE="docker compose"
+            else
+              COMPOSE="docker-compose"
+            fi
+
+            if [ -f .current_image ]; then
+              cp .current_image .previous_image
+            fi
+
+            echo "${{ secrets.GITHUB_TOKEN }}" |
+              docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+            docker pull "$FULL_IMAGE"
+
+            export STOCKPILOT_IMAGE="$FULL_IMAGE"
+            $COMPOSE up -d --force-recreate
+
+            for attempt in $(seq 1 12); do
+              if curl --fail --silent --location \
+                http://localhost:8000/api/v1/health/ >/dev/null; then
+                echo "$FULL_IMAGE" > .current_image
+                docker image prune --force
+                exit 0
+              fi
+              echo "Health check ${attempt}/12 failed; retrying..."
+              sleep 5
+            done
+
+            $COMPOSE logs --tail=100
+            if [ -f .previous_image ]; then
+              PREVIOUS_IMAGE="$(cat .previous_image)"
+              docker pull "$PREVIOUS_IMAGE"
+              export STOCKPILOT_IMAGE="$PREVIOUS_IMAGE"
+              $COMPOSE up -d --force-recreate
+            fi
+            exit 1
+
+      - name: Roll back image
+        if: ${{ inputs.rollback }}
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.GCE_HOST }}
+          username: ${{ secrets.GCE_USERNAME }}
+          key: ${{ secrets.GCE_SSH_KEY }}
+          script: |
+            set -eu
+
+            cd "/home/${{ secrets.GCE_USERNAME }}/stockpilot"
+
+            if [ ! -f .previous_image ]; then
+              echo "No previous image is recorded."
+              exit 1
+            fi
+
+            if docker compose version >/dev/null 2>&1; then
+              COMPOSE="docker compose"
+            else
+              COMPOSE="docker-compose"
+            fi
+
+            PREVIOUS_IMAGE="$(cat .previous_image)"
+            echo "${{ secrets.GITHUB_TOKEN }}" |
+              docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+            docker pull "$PREVIOUS_IMAGE"
+
+            export STOCKPILOT_IMAGE="$PREVIOUS_IMAGE"
+            $COMPOSE up -d --force-recreate
+
+            for attempt in $(seq 1 12); do
+              if curl --fail --silent --location \
+                http://localhost:8000/api/v1/health/ >/dev/null; then
+                echo "$PREVIOUS_IMAGE" > .current_image
+                exit 0
+              fi
+              echo "Rollback health check ${attempt}/12 failed; retrying..."
+              sleep 5
+            done
+
+            $COMPOSE logs --tail=100
+            exit 1
+
+  summary:
+    name: Deployment Summary
+    needs: [build-and-push, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write summary
+        shell: bash
+        run: |
+          {
+            echo "## StockPilot deployment"
+            echo
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Build and push | ${{ needs.build-and-push.result }} |"
+            echo "| Deploy | ${{ needs.deploy.result }} |"
+            echo
+            echo "- Revision: \`${{ env.DEPLOY_SHA }}\`"
+            echo "- Rollback: \`${{ inputs.rollback || false }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
