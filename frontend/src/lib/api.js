@@ -1,5 +1,5 @@
 // 백엔드 API 클라이언트 + 로컬 저장
-const API_BASE = "http://127.0.0.1:8000/api/v1";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000/api/v1";
 const TOKEN_KEY = "stockpilot_token";
 const USER_KEY = "stockpilot_user";
 const CONV_KEY = "stockpilot_conversations";
