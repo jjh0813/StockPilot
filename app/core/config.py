@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     rag_chunk_overlap: int = 200
     rag_embedding_batch_size: int = 16
 
+    # ── 인증 (JWT / 로그인) ───────────────
+    jwt_secret: str = "dev-secret-change-me"
+    jwt_expire_minutes: int = 60 * 24 * 7  # 7일
+
 
 @lru_cache
 def get_settings() -> Settings:

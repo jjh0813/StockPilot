@@ -92,30 +92,26 @@ create index if not exists document_facts_metadata_idx
 alter table public.document_facts enable row level security;
 
 -- Structured glossary table.
--- Long documents stay in public.documents(pgvector), but dictionary-style
--- investment terms are stored here for exact term/alias lookup.
-create table if not exists public.glossary_terms (
+-- Long documents stay in public.documents(pgvector), 
+-- ============================================================
+-- 사용자 계정 (로그인) & 즐겨찾기 연결
+-- ============================================================
+create table if not exists public.users (
   id bigserial primary key,
-  term text not null unique,
-  definition text not null,
-  category text,
-  aliases text[] not null default '{}'::text[],
-  difficulty text not null default 'beginner',
-  example text,
-  source_url text,
-  metadata jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  username text not null unique,
+  password_hash text not null,
+  created_at timestamptz not null default now()
 );
 
-create index if not exists glossary_terms_term_lower_idx
-  on public.glossary_terms (lower(term));
+alter table public.users enable row level security;
 
-create index if not exists glossary_terms_aliases_idx
-  on public.glossary_terms using gin (aliases);
-
-create index if not exists glossary_terms_metadata_idx
-  on public.glossary_terms using gin (metadata);
+-- 즐겨찾기를 사용자 계정에 연결 (기존 session_id 기반과 공존)
+alter table public.watchlists
+  add column if not exists user_id bigint references public.users(id) on delete cascade;
+alter table public.watchlists alter column session_id drop not null;
+create unique index if not exists watchlists_user_ticker_idx
+  on public.watchlists (user_id, ticker) where user_id is not null;
+ms using gin (metadata);
 
 alter table public.glossary_terms enable row level security;
 

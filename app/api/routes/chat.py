@@ -27,6 +27,33 @@ def _build_state(request: ChatRequest) -> dict:
     return state
 
 
+def _tool_payload(node_output: dict) -> dict:
+    """tool 노드 결과에서 프론트가 쓸 시세·뉴스 요약을 추린다."""
+    price = node_output.get("price_data") or {}
+    news = node_output.get("news_items") or []
+    return {
+        "price": (
+            {
+                "name": price.get("name"),
+                "ticker": price.get("ticker"),
+                "change_pct": price.get("change_pct"),
+                "current_price": price.get("current_price"),
+            }
+            if price
+            else None
+        ),
+        "news": [
+            {
+                "title": item.get("title"),
+                "url": item.get("original_link") or item.get("link"),
+                "source": item.get("source_domain"),
+                "session": item.get("market_session"),
+            }
+            for item in news[:5]
+        ],
+    }
+
+
 @router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
     """단건(비스트리밍) 응답. 그래프를 끝까지 실행해 최종 답변을 반환한다."""
@@ -57,7 +84,6 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
             # Solar가 생성하는 토큰 조각
             if mode == "messages":
                 message_chunk, metadata = chunk
-                # 노드가 반환한 완성 메시지(AIMessage)는 제외, 스트리밍 조각만
                 if (
                     metadata.get("langgraph_node") == "response"
                     and isinstance(message_chunk, AIMessageChunk)
@@ -87,6 +113,7 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
                         type="tool",
                         node="tool",
                         tool_name=tool_used,
+                        tool_result=_tool_payload(node_output),
                     ).to_sse()
                 # 토큰 스트리밍이 안 된 경우(폴백)에만 최종 답을 한 번에 전송
                 if node_name == "response" and not streamed_token:
