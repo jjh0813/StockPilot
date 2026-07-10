@@ -1,14 +1,11 @@
-// 백엔드 API 클라이언트
+// 백엔드 API 클라이언트 + 로컬 저장
 const API_BASE = "http://127.0.0.1:8000/api/v1";
 const TOKEN_KEY = "stockpilot_token";
 const USER_KEY = "stockpilot_user";
+const CONV_KEY = "stockpilot_conversations";
 
-export function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
-}
-export function getUsername() {
-  return localStorage.getItem(USER_KEY);
-}
+export function getToken() { return localStorage.getItem(TOKEN_KEY); }
+export function getUsername() { return localStorage.getItem(USER_KEY); }
 export function setAuth(token, username) {
   if (token) {
     localStorage.setItem(TOKEN_KEY, token);
@@ -19,6 +16,15 @@ export function setAuth(token, username) {
   }
 }
 
+// ── 대화 목록 로컬 저장 ────────────────
+export function loadConversations() {
+  try { return JSON.parse(localStorage.getItem(CONV_KEY) || "[]"); }
+  catch { return []; }
+}
+export function saveConversations(list) {
+  localStorage.setItem(CONV_KEY, JSON.stringify(list));
+}
+
 async function jsonFetch(path, { method = "GET", body, auth = false } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (auth) {
@@ -26,39 +32,24 @@ async function jsonFetch(path, { method = "GET", body, auth = false } = {}) {
     if (t) headers["Authorization"] = `Bearer ${t}`;
   }
   const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
+    method, headers, body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.detail || `요청 실패 (${res.status})`);
-  }
+  if (!res.ok) throw new Error(data.detail || `요청 실패 (${res.status})`);
   return data;
 }
 
-// ── 인증 ──────────────────────────────
 export async function registerUser(username, password) {
-  const data = await jsonFetch("/auth/register", {
-    method: "POST",
-    body: { username, password },
-  });
+  const data = await jsonFetch("/auth/register", { method: "POST", body: { username, password } });
   setAuth(data.access_token, data.username);
   return data;
 }
 export async function loginUser(username, password) {
-  const data = await jsonFetch("/auth/login", {
-    method: "POST",
-    body: { username, password },
-  });
+  const data = await jsonFetch("/auth/login", { method: "POST", body: { username, password } });
   setAuth(data.access_token, data.username);
   return data;
 }
-
-// ── 즐겨찾기 ──────────────────────────
-export async function fetchWatchlist() {
-  return jsonFetch("/watchlist/", { auth: true });
-}
+export async function fetchWatchlist() { return jsonFetch("/watchlist/", { auth: true }); }
 export async function addWatchlist(ticker, name) {
   return jsonFetch("/watchlist/", { method: "POST", body: { ticker, name }, auth: true });
 }
@@ -66,7 +57,6 @@ export async function removeWatchlist(ticker) {
   return jsonFetch(`/watchlist/${encodeURIComponent(ticker)}`, { method: "DELETE", auth: true });
 }
 
-// ── 채팅 SSE 스트리밍 ──────────────────
 export async function streamChat(message, { sessionId = "web", onEvent, signal } = {}) {
   const res = await fetch(`${API_BASE}/chat/stream`, {
     method: "POST",
@@ -87,11 +77,7 @@ export async function streamChat(message, { sessionId = "web", onEvent, signal }
     for (const frame of frames) {
       const line = frame.trim();
       if (!line.startsWith("data:")) continue;
-      try {
-        onEvent(JSON.parse(line.slice(5).trim()));
-      } catch {
-        // 무시
-      }
+      try { onEvent(JSON.parse(line.slice(5).trim())); } catch { /* 무시 */ }
     }
   }
 }

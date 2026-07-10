@@ -16,7 +16,10 @@ function dirWord(p) {
 }
 
 function ResultCard({ status, thinking, price, answer, sources, errorMsg }) {
-  const hasPct = price && price.change_pct !== null && price.change_pct !== undefined
+  const pct = price && price.change_pct !== null && price.change_pct !== undefined
+    ? Number(price.change_pct)
+    : null
+  const hasPct = pct !== null && !Number.isNaN(pct)
   const showThinking = status === 'loading' && !answer
 
   return (
@@ -37,10 +40,10 @@ function ResultCard({ status, thinking, price, answer, sources, errorMsg }) {
       {hasPct && (
         <div className="mb-1 flex items-baseline gap-3">
           <span className="text-lg text-neutral-200">{price.name || '종목'}</span>
-          <span className={`text-4xl font-bold ${colorFor(price.change_pct)}`}>
-            {formatPct(price.change_pct)}
+          <span className={`text-4xl font-bold ${colorFor(pct)}`}>
+            {formatPct(pct)}
           </span>
-          <span className="text-sm text-neutral-400">{dirWord(price.change_pct)}</span>
+          <span className="text-sm text-neutral-400">{dirWord(pct)}</span>
         </div>
       )}
       {price && price.current_price != null && (
