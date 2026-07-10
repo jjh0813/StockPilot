@@ -28,7 +28,7 @@ def test_chat_e2e_returns_stock_answer(mock_tools):
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["tool_used"] == "get_stock_price,get_news"
+    assert body["tool_used"] == "get_stock_price,get_news,get_disclosure"
     assert "삼성전자" in body["message"]
     assert "투자 자문이 아닌" in body["message"]
 def test_chat_stream_event_sequence(mock_tools):
