@@ -1,3 +1,5 @@
+import GlossaryAnswer from './GlossaryAnswer'
+
 function formatPct(p) {
   const a = Math.abs(p).toFixed(2)
   if (p > 0) return `▲ ${a}%`
@@ -15,7 +17,7 @@ function dirWord(p) {
   return '보합'
 }
 
-function ResultCard({ status, thinking, price, answer, sources, errorMsg }) {
+function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms }) {
   const pct = price && price.change_pct !== null && price.change_pct !== undefined
     ? Number(price.change_pct)
     : null
@@ -52,9 +54,7 @@ function ResultCard({ status, thinking, price, answer, sources, errorMsg }) {
         </p>
       )}
 
-      {answer && (
-        <div className="whitespace-pre-wrap leading-relaxed text-neutral-100">{answer}</div>
-      )}
+      {answer && <GlossaryAnswer text={answer} terms={terms} />}
 
       {sources && sources.length > 0 && (
         <div className="mt-5">
