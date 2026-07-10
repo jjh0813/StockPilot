@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StockPilot Demo</title>
+    <link rel="stylesheet" href="/frontend/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">StockPilot MVP</p>
+          <h1>뉴스·공시·RAG로 설명하는 투자 리서치 어시스턴트</h1>
+          <p class="subtitle">
+            질문을 보내면 FastAPI SSE 스트림으로 라우팅, 도구 실행, 답변 생성 상태를
+            실시간으로 보여줍니다.
+          </p>
+        </div>
+        <div class="status-card">
+          <span class="dot"></span>
+          <div>
+            <strong>Local FastAPI</strong>
+            <p id="apiStatus">서버 연결 대기 중</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="scenario-panel">
+        <div class="section-title">
+          <h2>사용자 시나리오</h2>
+          <p>멘토링 때 버튼 하나씩 눌러서 흐름을 보여주면 됩니다.</p>
+        </div>
+        <div class="scenario-grid">
+          <button class="scenario" data-message="삼성전자 왜 떨어짐?">
+            <span>핵심 시나리오</span>
+            삼성전자 왜 떨어짐?
+          </button>
+          <button class="scenario" data-message="PER이 뭐야? 초보자도 알기 쉽게 설명해줘">
+            <span>용어 설명</span>
+            PER이 뭐야?
+          </button>
+          <button class="scenario" data-message="삼성전자 사업보고서에서 리스크 요인 알려줘">
+            <span>공시/RAG</span>
+            사업보고서 리스크
+          </button>
+          <button class="scenario" data-message="요즘 좋은 뉴스 나온 종목 있어?">
+            <span>스크리너</span>
+            호재 종목 찾기
+          </button>
+        </div>
+      </section>
+
+      <section class="chat-layout">
+        <section class="chat-card">
+          <div class="section-title">
+            <h2>질문</h2>
+            <p>직접 입력하거나 위 시나리오를 선택하세요.</p>
+          </div>
+          <form id="chatForm" class="input-row">
+            <textarea
+              id="messageInput"
+              name="message"
+              rows="3"
+              placeholder="예: 삼성전자 왜 떨어짐?"
+              required
+            >삼성전자 왜 떨어짐?</textarea>
+            <button id="sendButton" type="submit">분석 시작</button>
+          </form>
+
+          <div class="answer-box">
+            <div class="answer-header">
+              <h3>최종 답변</h3>
+              <span id="toolBadge">tool: -</span>
+            </div>
+            <pre id="answerOutput">아직 요청 전입니다.</pre>
+          </div>
+        </section>
+
+        <aside class="timeline-card">
+          <div class="section-title">
+            <h2>SSE 이벤트</h2>
+            <p>백엔드가 보내는 진행 상태가 여기에 쌓입니다.</p>
+          </div>
+          <ol id="eventTimeline" class="timeline">
+            <li class="muted">요청을 보내면 thinking → tool → response → done 순서로 표시됩니다.</li>
+          </ol>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/frontend/app.js"></script>
+  </body>
+</html>

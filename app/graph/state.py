@@ -24,6 +24,7 @@ class StockPilotState(TypedDict, total=False):
     tool_result: Optional[Any]
     price_data: Optional[Any]
     news_items: list[dict[str, Any]]
+    positive_stocks: list[dict[str, Any]]
     session_id: str
     user_id: Optional[str]
 
@@ -43,6 +44,7 @@ def create_initial_state(
         "tool_result": None,
         "price_data": None,
         "news_items": [],
+        "positive_stocks": [],
         "session_id": session_id,
         "user_id": user_id,
     }

@@ -1,12 +1,17 @@
 """FastAPI 진입점 — 앱 생성, 미들웨어, 라우터 등록."""
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from app.api.routes import api_router
 from app.graph.graph import get_stockpilot_graph
+
+FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
 
 # 프론트엔드 개발 서버 (Vite)
 ALLOWED_ORIGINS = [
@@ -35,3 +40,16 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api/v1")
+
+if FRONTEND_DIR.exists():
+    app.mount(
+        "/frontend",
+        StaticFiles(directory=FRONTEND_DIR),
+        name="frontend",
+    )
+
+
+@app.get("/", include_in_schema=False)
+async def demo_ui() -> FileResponse:
+    """Serve the lightweight local demo UI."""
+    return FileResponse(FRONTEND_DIR / "index.html")

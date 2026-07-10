@@ -46,6 +46,15 @@ async def test_router_node_tool():
     assert result["ticker"] == "삼성전자"
 
 
+async def test_router_node_positive_screener_tool():
+    state = create_initial_state("s")
+    state["messages"] = [HumanMessage(content="요즘 좋은 뉴스 나온 종목 있어?")]
+    result = await router_node(state)
+
+    assert result["intent"] == "tool"
+    assert result["tool_name"] == "find_positive_news_stocks"
+
+
 async def test_response_node_format():
     state = create_initial_state("s")
     state["ticker"] = "삼성전자"
