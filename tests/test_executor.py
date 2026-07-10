@@ -1,6 +1,7 @@
-from app.repositories import disclosure, news, price, watchlist
+from app.repositories import disclosure, glossary, news, price, watchlist
 from app.schemas.tool_results import (
     DisclosureResult,
+    GlossaryTermResult,
     NewsResult,
     StockPriceResult,
     WatchlistResult,
@@ -9,6 +10,7 @@ from app.tools.executor import ToolExecutor
 from tests.fixtures.tool_responses import (
     directional_news_item,
     disclosure_item,
+    glossary_term_item,
     stock_snapshot,
     watchlist_item,
 )
@@ -96,6 +98,24 @@ async def test_executor_connects_watchlist_repository(monkeypatch):
     assert result["data"]["ticker"] == "005930"
     assert result["data"]["session_id"] == "session-1"
     WatchlistResult.model_validate(result)
+
+
+async def test_executor_connects_glossary_repository(monkeypatch):
+    async def fake_search_terms(query: str, *, limit: int):
+        assert query == "PER이 뭐야?"
+        assert limit == 3
+        return [glossary_term_item()]
+
+    monkeypatch.setattr(glossary, "search_terms", fake_search_terms)
+
+    result = await ToolExecutor().execute(
+        "lookup_glossary_term",
+        {"query": "PER이 뭐야?", "limit": 3},
+    )
+
+    assert result["success"] is True
+    assert result["data"]["terms"][0]["term"] == "PER"
+    GlossaryTermResult.model_validate(result)
 
 
 async def test_executor_returns_structured_error(monkeypatch):

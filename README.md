@@ -61,13 +61,19 @@ copy .env.example .env      # Windows
 # 4) 투자 용어 사전 임베딩 적재
 uv run python data/scripts/ingest_rag.py
 
+# 4-1) structured glossary exact lookup check
+uv run python data/scripts/ingest_rag.py lookup-term --query PER
+
 # 5) 사업보고서 파싱 결과만 먼저 확인(선택)
 uv run python data/scripts/ingest_rag.py fetch-dart --company 삼성전자
 
 # 6) 사업보고서를 Supabase에 적재(선택)
 uv run python data/scripts/ingest_rag.py ingest-dart --company 삼성전자
 
-# 7) 개발 서버 실행
+# 7) 주요 종목 10개 사업보고서 배치 캐시(선택)
+uv run python data/scripts/ingest_rag.py ingest-dart-batch
+
+# 8) 개발 서버 실행
 uv run uvicorn app.main:app --reload
 ```
 

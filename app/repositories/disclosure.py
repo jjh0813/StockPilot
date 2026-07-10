@@ -152,8 +152,7 @@ async def get_recent_disclosures(corp: str, limit: int = 10) -> list[dict]:
             "report_name": row["report_nm"],
             "received_date": row["rcept_dt"],
             "source_url": (
-                "https://dart.fss.or.kr/dsaf001/main.do"
-                f"?rcpNo={row['rcept_no']}"
+                f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={row['rcept_no']}"
             ),
         }
         for row in rows
@@ -162,6 +161,14 @@ async def get_recent_disclosures(corp: str, limit: int = 10) -> list[dict]:
 
 async def get_business_report(corp: str) -> dict | None:
     """가장 최근 사업보고서(A001)의 원문을 내려받아 정제된 텍스트로 반환합니다."""
+    metadata = await get_business_report_metadata(corp)
+    if metadata is None:
+        return None
+    return await download_business_report(metadata)
+
+
+async def get_business_report_metadata(corp: str) -> dict | None:
+    """가장 최근 사업보고서의 메타데이터를 원문 다운로드 없이 반환합니다."""
     client = DartClient(settings.dart_api_key)
     corporation = await client.resolve_corporation(corp)
     rows = await client.list_disclosures(
@@ -174,9 +181,6 @@ async def get_business_report(corp: str) -> dict | None:
         return None
 
     row = rows[0]
-    filename, content = extract_primary_document(
-        await client.download_document(row["rcept_no"])
-    )
     return {
         "receipt_no": row["rcept_no"],
         "corp_code": row["corp_code"],
@@ -185,9 +189,19 @@ async def get_business_report(corp: str) -> dict | None:
         "report_name": row["report_nm"],
         "received_date": row["rcept_dt"],
         "source_url": (
-            "https://dart.fss.or.kr/dsaf001/main.do"
-            f"?rcpNo={row['rcept_no']}"
+            f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={row['rcept_no']}"
         ),
+    }
+
+
+async def download_business_report(metadata: dict) -> dict:
+    """메타데이터에 해당하는 DART 원문을 내려받아 텍스트를 결합합니다."""
+    client = DartClient(settings.dart_api_key)
+    filename, content = extract_primary_document(
+        await client.download_document(metadata["receipt_no"])
+    )
+    return {
+        **metadata,
         "archive_filename": filename,
         "content": content,
     }

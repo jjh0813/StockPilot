@@ -27,6 +27,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.repositories.disclosure import get_business_report  # noqa: E402
+from app.repositories.glossary import (  # noqa: E402
+    ingest_glossary_terms,
+    search_terms,
+)
 from app.repositories.rag import (  # noqa: E402
     chunk_document,
     ingest_business_report,
@@ -37,6 +41,7 @@ from app.services.document_ingestion import (  # noqa: E402
     ingest_document,
     prepare_document,
 )
+from app.services.report_cache import cache_business_reports  # noqa: E402
 
 DEFAULT_GLOSSARY = PROJECT_ROOT / "data" / "glossary.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "rag"
@@ -45,6 +50,13 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "rag"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="StockPilot RAG 적재 파이프라인")
     commands = parser.add_subparsers(dest="command")
+
+    lookup_term = commands.add_parser(
+        "lookup-term",
+        help="search structured investment glossary terms",
+    )
+    lookup_term.add_argument("--query", required=True)
+    lookup_term.add_argument("--limit", type=int, default=5)
 
     commands.add_parser("ingest-glossary", help="투자 용어 사전을 Supabase에 적재")
 
@@ -60,6 +72,21 @@ def parse_args() -> argparse.Namespace:
         help="최신 사업보고서를 Supabase에 적재",
     )
     ingest_dart.add_argument("--company", required=True)
+
+    batch = commands.add_parser(
+        "ingest-dart-batch",
+        help="주요 종목의 최신 사업보고서를 Supabase에 배치 적재",
+    )
+    batch.add_argument(
+        "--companies",
+        nargs="+",
+        help="회사명 목록. 생략하면 기본 주요 종목 10개",
+    )
+    batch.add_argument(
+        "--refresh",
+        action="store_true",
+        help="이미 캐시된 동일 접수번호도 다시 임베딩",
+    )
 
     prepare_file = commands.add_parser(
         "prepare-file",
@@ -84,8 +111,18 @@ async def main_async(args: argparse.Namespace) -> None:
     command = args.command or "ingest-glossary"
 
     if command == "ingest-glossary":
+        terms_saved = await ingest_glossary_terms(DEFAULT_GLOSSARY)
         saved = await ingest_glossary(DEFAULT_GLOSSARY)
+        logger.success(f"structured glossary terms saved: {terms_saved}")
         logger.success(f"투자 용어 적재 완료: {saved} chunks")
+        return
+
+    if command == "lookup-term":
+        matches = await search_terms(args.query, limit=args.limit)
+        if not matches:
+            logger.warning("no glossary term matched")
+            return
+        print(json.dumps(matches, ensure_ascii=False, indent=2))
         return
 
     if command in {"fetch-dart", "ingest-dart"}:
@@ -123,6 +160,23 @@ async def main_async(args: argparse.Namespace) -> None:
                 f"{report['corp_name']}_{report['receipt_no']}.json",
             )
             logger.success(f"사업보고서 저장 완료: {target} ({len(chunks)} chunks)")
+        return
+
+    if command == "ingest-dart-batch":
+        summary = await cache_business_reports(
+            args.companies,
+            refresh=args.refresh,
+        )
+        for item in summary.items:
+            logger.info(
+                f"[{item.status}] {item.company}: "
+                f"chunks={item.chunks}, reason={item.reason}"
+            )
+        logger.success(
+            "사업보고서 배치 캐시 완료: "
+            f"total={summary.total}, cached={summary.cached}, "
+            f"skipped={summary.skipped}, failed={summary.failed}"
+        )
         return
 
     if command in {"prepare-file", "ingest-file"}:

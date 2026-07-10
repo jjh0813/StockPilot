@@ -12,6 +12,7 @@ ToolName = Literal[
     "get_disclosure",
     "find_positive_news_stocks",
     "add_watchlist",
+    "lookup_glossary_term",
 ]
 MarketDirection = Literal["down", "up", "neutral"]
 PricePeriod = Literal["1w", "1m", "3m", "6m", "1y"]
@@ -121,10 +122,28 @@ class AddWatchlistArgs(ToolArgs):
     )
 
 
+class LookupGlossaryTermArgs(ToolArgs):
+    """Investment glossary exact/alias lookup input."""
+
+    query: str = Field(
+        min_length=1,
+        max_length=100,
+        description="Investment term or question. Examples: PER, PBR, CB",
+        examples=["PER"],
+    )
+    limit: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Maximum number of glossary matches to return",
+    )
+
+
 TOOL_ARG_SCHEMAS: dict[ToolName, type[ToolArgs]] = {
     "get_stock_price": GetStockPriceArgs,
     "get_news": GetNewsArgs,
     "get_disclosure": GetDisclosureArgs,
     "find_positive_news_stocks": FindPositiveNewsStocksArgs,
     "add_watchlist": AddWatchlistArgs,
+    "lookup_glossary_term": LookupGlossaryTermArgs,
 }

@@ -1,5 +1,6 @@
 from app.schemas.tool_results import (
     DisclosureItem,
+    GlossaryTerm,
     NewsItem,
     StockPriceData,
     WatchlistData,
@@ -8,6 +9,7 @@ from app.tools.executor import _normalize_news_item
 from tests.fixtures.tool_responses import (
     directional_news_item,
     disclosure_item,
+    glossary_term_item,
     stock_snapshot,
     watchlist_item,
 )
@@ -69,3 +71,11 @@ def test_watchlist_mock_matches_actual_normalized_contract():
 
     assert validated.saved is True
     assert validated.session_id == "session-1"
+
+
+def test_glossary_mock_matches_actual_normalized_contract():
+    validated = GlossaryTerm.model_validate(glossary_term_item())
+
+    assert validated.term == "PER"
+    assert validated.aliases == ["Price Earnings Ratio"]
+    assert validated.match_score == 100
