@@ -18,6 +18,7 @@ export default function Stepper({
   nextButtonText = 'Continue',
   completeButtonText = 'Complete',
   disableStepIndicators = false,
+  validateStep = () => true,
   renderStepIndicator,
   ...rest
 }) {
@@ -38,9 +39,13 @@ export default function Stepper({
     if (currentStep > 1) { setDirection(-1); updateStep(currentStep - 1); }
   };
   const handleNext = () => {
+    if (!validateStep(currentStep)) return;
     if (!isLastStep) { setDirection(1); updateStep(currentStep + 1); }
   };
-  const handleComplete = () => { setDirection(1); updateStep(totalSteps + 1); };
+  const handleComplete = () => {
+    if (!validateStep(currentStep)) return;
+    setDirection(1); updateStep(totalSteps + 1);
+  };
 
   return (
     <div className="outer-container" {...rest}>

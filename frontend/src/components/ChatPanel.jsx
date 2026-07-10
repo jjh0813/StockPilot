@@ -3,16 +3,21 @@ import { useEffect, useRef, useState } from 'react'
 import ResultCard from './ResultCard'
 import { streamChat } from '../lib/api'
 
-function ChatPanel() {
-  const [messages, setMessages] = useState([])
+function ChatPanel({ sessionId, initialMessages, seed, onMessagesChange }) {
+  const [messages, setMessages] = useState(initialMessages || [])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  // 세션 유지: 패널이 살아있는 동안 같은 session_id 사용
-  const sessionId = useRef('web-' + Math.random().toString(36).slice(2))
+  const busyRef = useRef(false)
   const bottomRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  // 메시지 변할 때마다 상위(App)로 올려 localStorage 저장
+  useEffect(() => {
+    onMessagesChange(messages)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages])
 
   function patchLastAssistant(patch) {
@@ -30,26 +35,18 @@ function ChatPanel() {
   }
 
   async function send(query) {
-    if (!query.trim() || busy) return
+    if (!query || !query.trim() || busyRef.current) return
+    busyRef.current = true
     setBusy(true)
     setInput('')
     setMessages((prev) => [
       ...prev,
       { role: 'user', text: query },
-      {
-        role: 'assistant',
-        status: 'loading',
-        thinking: '분석을 시작할게요...',
-        price: null,
-        answer: '',
-        sources: [],
-        errorMsg: '',
-      },
+      { role: 'assistant', status: 'loading', thinking: '분석을 시작할게요...', price: null, answer: '', sources: [], errorMsg: '' },
     ])
-
     try {
       await streamChat(query, {
-        sessionId: sessionId.current,
+        sessionId,
         onEvent: (e) => {
           if (e.type === 'thinking') {
             patchLastAssistant({ thinking: e.content || '', status: 'loading' })
@@ -61,10 +58,7 @@ function ChatPanel() {
               status: 'streaming',
             })
           } else if (e.type === 'token') {
-            patchLastAssistant((m) => ({
-              status: 'streaming',
-              answer: (m.answer || '') + (e.content || ''),
-            }))
+            patchLastAssistant((m) => ({ status: 'streaming', answer: (m.answer || '') + (e.content || '') }))
           } else if (e.type === 'response') {
             if (e.content) patchLastAssistant({ answer: e.content })
           } else if (e.type === 'error') {
@@ -80,9 +74,16 @@ function ChatPanel() {
         errorMsg: '서버에 연결하지 못했어요. 백엔드(uvicorn)가 켜져 있는지 확인해주세요.',
       })
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
+
+  // 내비 메뉴에서 넘어온 질문 자동 전송
+  useEffect(() => {
+    if (seed && seed.text) send(seed.text)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.nonce])
 
   function handleSubmit(e) {
     e.preventDefault()
@@ -91,7 +92,7 @@ function ChatPanel() {
 
   return (
     <div className="flex w-full flex-1 flex-col">
-      <div className="flex-1 space-y-4 overflow-y-auto pb-4">
+      <div className="flex-1 space-y-4 pb-4">
         {messages.length === 0 && (
           <p className="mt-4 text-center text-neutral-400">
             종목명을 입력하면 등락의 원인을 분석해드려요. (예: 삼성전자)
@@ -111,7 +112,7 @@ function ChatPanel() {
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={handleSubmit} className="sticky bottom-0 pt-2">
+      <form onSubmit={handleSubmit} className="sticky bottom-4 pt-2">
         <div className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 p-2 backdrop-blur-lg">
           <input
             value={input}

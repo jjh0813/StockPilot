@@ -1,47 +1,119 @@
 import { useState } from 'react'
 
+import Aurora from './components/Aurora'
 import AuthModal from './components/AuthModal'
 import ChatPanel from './components/ChatPanel'
-import LetterGlitch from './components/LetterGlitch'
 import NavBar from './components/NavBar'
-import { getUsername, setAuth } from './lib/api'
+import Sidebar from './components/Sidebar'
+import { getUsername, loadConversations, saveConversations, setAuth } from './lib/api'
 
-const GLITCH_COLORS = ['#404040', '#525252', '#737373', '#34d399']
+const AURORA_COLORS = ['#052e21', '#34d399', '#065f46']
+const ANALYSIS_HINT = '종목명을 입력하면 등락의 원인을 분석해드려요. (예: 삼성전자)'
+const GLOSSARY_HINT = '궁금한 투자 용어를 입력해보세요. (예: PER, PBR, 유상증자, 공매도)'
+
+function deriveTitle(messages, fallback) {
+  const firstUser = (messages || []).find((m) => m.role === 'user')
+  if (firstUser && firstUser.text) return firstUser.text.slice(0, 24)
+  return fallback || '새 대화'
+}
 
 function App() {
+  const [conversations, setConversations] = useState(() =>
+    loadConversations().filter((c) => (c.messages || []).length > 0)
+  )
+  const [activeId, setActiveId] = useState(null)
   const [started, setStarted] = useState(false)
+  const [seed, setSeed] = useState(null)
+  const [hint, setHint] = useState(ANALYSIS_HINT)
   const [username, setUsername] = useState(() => getUsername() || null)
   const [showAuth, setShowAuth] = useState(false)
 
-  function handleAuthed(name) {
-    setUsername(name)
-    setShowAuth(false)
-  }
-  function handleLogout() {
-    setAuth(null)
-    setUsername(null)
+  function persist(list) {
+    setConversations(list)
+    saveConversations(list)
   }
 
+  function newConversation(seedText = '', convHint = ANALYSIS_HINT) {
+    const id = 'c-' + Date.now()
+    const sessionId = 'web-' + Math.random().toString(36).slice(2)
+    const conv = { id, sessionId, title: '새 대화', messages: [], createdAt: Date.now() }
+    persist([conv, ...conversations])
+    setActiveId(id)
+    setStarted(true)
+    setHint(convHint)
+    setSeed({ text: seedText, nonce: Date.now() })
+  }
+
+  // 로고 클릭 → 메인 화면(새 대화 생성 안 함)
+  function goHome() {
+    setStarted(false)
+    setActiveId(null)
+    setSeed(null)
+  }
+
+  function selectConversation(id) {
+    setActiveId(id)
+    setStarted(true)
+    setSeed(null)
+    setHint(ANALYSIS_HINT)
+  }
+
+  function handleMessagesChange(id, messages) {
+    setConversations((prev) => {
+      const next = prev.map((c) =>
+        c.id === id ? { ...c, messages, title: deriveTitle(messages, c.title) } : c
+      )
+      saveConversations(next)
+      return next
+    })
+  }
+
+  function deleteConversation(id) {
+    setConversations((prev) => {
+      const next = prev.filter((c) => c.id !== id)
+      saveConversations(next)
+      return next
+    })
+    if (activeId === id) {
+      setActiveId(null)
+      setStarted(false)
+    }
+  }
+
+  function handleNav(kind) {
+    if (kind === 'screener') newConversation('오늘 급등하거나 급락한 종목과 그 이유를 알려줘')
+    else if (kind === 'glossary') newConversation('', GLOSSARY_HINT)
+    else newConversation('', ANALYSIS_HINT) // 종목 분석
+  }
+  function handleAuthed(name) { setUsername(name); setShowAuth(false) }
+  function handleLogout() { setAuth(null); setUsername(null) }
+
+  const active = conversations.find((c) => c.id === activeId) || null
+
   return (
-    <div className="relative min-h-screen overflow-hidden bg-black text-neutral-100">
-      <div className="absolute inset-0">
-        <LetterGlitch
-          glitchColors={GLITCH_COLORS}
-          glitchSpeed={50}
-          centerVignette={true}
-          outerVignette={true}
-          smooth={true}
-        />
+    <div className="relative min-h-screen bg-black text-neutral-100">
+      <div className="fixed inset-0 z-0">
+        <Aurora colorStops={AURORA_COLORS} blend={0.5} amplitude={1.0} speed={0.5} />
       </div>
 
       <NavBar
         username={username}
+        onHome={goHome}
+        onNav={handleNav}
         onLoginClick={() => setShowAuth(true)}
         onLogout={handleLogout}
       />
 
+      <Sidebar
+        conversations={conversations}
+        activeId={activeId}
+        onSelect={selectConversation}
+        onNew={() => newConversation('')}
+        onDelete={deleteConversation}
+      />
+
       <main className="relative z-10 mx-auto flex min-h-screen max-w-2xl flex-col px-4 pt-28 pb-8">
-        {!started ? (
+        {!started || !active ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center animate-fade-in">
             <span className="mb-4 block font-mono text-xs uppercase tracking-[0.35em] text-neutral-400 drop-shadow">
               Stock Research Assistant
@@ -54,7 +126,7 @@ function App() {
             </p>
             <button
               type="button"
-              onClick={() => setStarted(true)}
+              onClick={() => newConversation('')}
               className="rounded-full border border-white/15 bg-white/10 px-8 py-4 text-base font-semibold text-white shadow-lg shadow-black/20 backdrop-blur-lg transition-all hover:scale-[1.03] hover:bg-white/20 active:scale-95"
             >
               시작하기 →
@@ -62,7 +134,14 @@ function App() {
           </div>
         ) : (
           <div className="flex flex-1 flex-col animate-fade-in-up">
-            <ChatPanel />
+            <ChatPanel
+              key={active.id}
+              sessionId={active.sessionId}
+              initialMessages={active.messages}
+              seed={seed}
+              hint={hint}
+              onMessagesChange={(msgs) => handleMessagesChange(active.id, msgs)}
+            />
           </div>
         )}
 

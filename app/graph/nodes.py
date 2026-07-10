@@ -1,55 +1,85 @@
 """그래프 노드 — router / rag / tool / response."""
 import asyncio
-
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
-
 from app.core.llm import get_llm
 from app.core.market_time import tag_session
 from app.core.prompts import RAG_GROUNDING, RESPONSE_PROMPT, TOOL_GROUNDING
 from app.graph.state import StockPilotState
+from app.repositories.rag import search_documents
 from app.tools.executor import ToolExecutor
-
 _executor = ToolExecutor()
-
+# 세션별 직전 분석 종목 (후속 질문 문맥 유지용)
+_SESSION_TICKER: dict[str, str] = {}
 # 용어·개념 질문 힌트 → rag로 분기
 RAG_HINTS = (
     "뭐야", "무슨 뜻", "뜻이", "설명", "per", "pbr",
     "유상증자", "공매도", "배당", "리스크",
 )
-
+# 급등·급락 스크리너 힌트 (특정 종목 없이 "요즘 뜨는 종목" 류)
+SCREENER_HINTS = (
+    "급등", "급락", "뜨는", "오르는", "상승한 종목", "하락한 종목",
+    "많이 오른", "많이 내린", "핫한",
+)
+# 후속 질문 힌트 (종목명 없이 직전 종목을 이어 묻는 경우)
+FOLLOWUP_HINTS = (
+    "왜", "그럼", "그래서", "이유", "더", "자세", "어떻게", "그건", "방금", "전망",
+)
 # 종목명 사전(ticker 추출용). 실제 종목 매핑은 이후 확장.
 KNOWN_STOCKS = [
     "삼성전자", "SK하이닉스", "LG에너지솔루션", "삼성바이오로직스", "현대차",
     "기아", "NAVER", "카카오", "POSCO홀딩스", "셀트리온",
 ]
-
-
 def _last_user_text(state: StockPilotState) -> str:
     messages = state.get("messages") or []
     return messages[-1].content if messages else ""
-
-
 async def router_node(state: StockPilotState) -> dict:
     """사용자 의도를 분류하고 대상 종목을 추출한다."""
     text = _last_user_text(state)
     lower = text.lower()
-    intent = "rag" if any(hint in lower for hint in RAG_HINTS) else "tool"
-    ticker = next((s for s in KNOWN_STOCKS if s in text), text.strip())
+    session_id = state.get("session_id") or "default"
+    matched_stock = next((s for s in KNOWN_STOCKS if s in text), None)
+    # 특정 종목이 없고 스크리너 힌트가 있으면 급등·급락 스크리너
+    if matched_stock is None and any(h in text for h in SCREENER_HINTS):
+        logger.info("🔀 [Router] intent=tool (screener)")
+        return {"intent": "tool", "screen": True, "ticker": None}
+    is_rag = any(hint in lower for hint in RAG_HINTS)
+    if matched_stock:
+        _SESSION_TICKER[session_id] = matched_stock  # 문맥 저장
+        ticker = matched_stock
+    elif is_rag:
+        ticker = text.strip()
+    else:
+        # 후속 질문(짧거나 왜/이유/전망 등)일 때만 세션의 직전 종목을 재사용
+        prev = _SESSION_TICKER.get(session_id)
+        is_followup = any(h in text for h in FOLLOWUP_HINTS)
+        ticker = prev if (prev and is_followup) else text.strip()
+    intent = "rag" if is_rag else "tool"
     logger.info(f"🔀 [Router] intent={intent}, ticker={ticker}")
-    return {"intent": intent, "ticker": ticker}
-
-
+    return {"intent": intent, "screen": False, "ticker": ticker}
 async def rag_node(state: StockPilotState) -> dict:
-    """용어·공시 문서를 검색한다."""
-    # TODO: repositories/rag.py 연동
-    docs: list[str] = []
+    """용어 사전·공시 문서를 RAG로 검색한다."""
+    query = _last_user_text(state)
+    try:
+        results = await search_documents(query, top_k=4)
+        docs = [r.get("content", "") for r in results if r.get("content")]
+    except Exception as exc:
+        logger.warning(f"RAG 검색 실패: {type(exc).__name__}: {exc}")
+        docs = []
     logger.info(f"📚 [RAG] 문서 {len(docs)}건")
     return {"retrieved_docs": docs}
-
-
 async def tool_node(state: StockPilotState) -> dict:
     """도구를 실행해 종목 데이터를 수집한다."""
+    # 급등·급락 스크리너 모드
+    if state.get("screen"):
+        result = await _executor.execute("find_positive_news_stocks", {})
+        stocks = (result.get("data") or {}).get("stocks", [])
+        logger.info(f"🔧 [Tool] 스크리너 완료 | 종목 {len(stocks)}개")
+        return {
+            "screener_results": stocks,
+            "tool_result": {"stocks": stocks},
+            "tool_name": "find_positive_news_stocks",
+        }
     ticker = state.get("ticker") or ""
     price = await _executor.execute("get_stock_price", {"ticker": ticker})
     user_text = _last_user_text(state)
@@ -69,7 +99,6 @@ async def tool_node(state: StockPilotState) -> dict:
         {"company": ticker, "direction": direction},
     )
     news_items = news.get("data", {}).get("news", [])
-    # 발행 시각을 정규장 기준 구간(장전/장중/장후)으로 태깅
     news_items = [tag_session(item) for item in news_items]
     logger.info(f"🔧 [Tool] 수집 완료 | 뉴스 {len(news_items)}건")
     return {
@@ -78,8 +107,6 @@ async def tool_node(state: StockPilotState) -> dict:
         "tool_result": {"price": price.get("data"), "news": news_items},
         "tool_name": "get_stock_price,get_news",
     }
-
-
 def _format_change(change_pct: float | None) -> tuple[str, str]:
     """등락률 → (화살표, 방향 단어)."""
     if change_pct is None:
@@ -89,8 +116,6 @@ def _format_change(change_pct: float | None) -> tuple[str, str]:
     if change_pct < 0:
         return "▼", "하락"
     return "―", "보합"
-
-
 def _tool_context(price: dict, news_items: list[dict]) -> str:
     """Solar에 넘길 근거 데이터(시세·뉴스)를 텍스트로 정리한다."""
     lines: list[str] = []
@@ -112,8 +137,21 @@ def _tool_context(price: dict, news_items: list[dict]) -> str:
             meta = " · ".join(x for x in (source, session) if x)
             lines.append(f"- {title}" + (f" ({meta})" if meta else ""))
     return "\n".join(lines)
-
-
+def _format_screener(stocks: list[dict]) -> str:
+    """스크리너 결과를 목록 형태 답변으로 만든다."""
+    if not stocks:
+        return (
+            "최근 상승 근거가 뚜렷한 종목을 찾지 못했어요.\n\n"
+            "※ 투자 자문이 아닌 참고용 정보입니다."
+        )
+    lines = ["📈 최근 상승 이슈가 뚜렷한 종목", ""]
+    for s in stocks[:5]:
+        name = s.get("ticker", "")
+        top = s.get("top_news") or "관련 이슈"
+        lines.append(f"• {name} — {top}")
+    lines.append("")
+    lines.append("※ 상승 근거 뉴스 기준이며, 투자 자문이 아닌 참고용 정보입니다.")
+    return "\n".join(lines)
 def _fallback_answer(price: dict, news_items: list[dict], docs: list[str]) -> str:
     """Solar 호출 실패 시 사용하는 템플릿 응답."""
     change_pct = price.get("change_pct")
@@ -144,21 +182,26 @@ def _fallback_answer(price: dict, news_items: list[dict], docs: list[str]) -> st
     if docs:
         return "\n".join(docs) + "\n\n※ 투자 자문이 아닌 참고용 정보입니다."
     return "관련 정보를 찾지 못했어요. 종목명을 다시 알려주세요."
-
-
 async def response_node(state: StockPilotState) -> dict:
     """수집한 근거를 바탕으로 Solar가 등락률·원인 분석 응답을 생성한다."""
+    # 스크리너 결과는 목록 템플릿으로 바로 응답
+    screener = state.get("screener_results")
+    if screener is not None:
+        logger.info("💬 [Response] 스크리너 응답 생성 완료")
+        return {"messages": [AIMessage(content=_format_screener(screener))]}
     price = state.get("price_data") or {}
     news_items = state.get("news_items") or []
     docs = state.get("retrieved_docs") or []
     user_text = _last_user_text(state)
-
     system = RESPONSE_PROMPT
     if docs:
         system += RAG_GROUNDING.format(context="\n\n".join(docs))
     if price or news_items:
         system += TOOL_GROUNDING.format(tool_result=_tool_context(price, news_items))
-
+        system += (
+            "\n\n중요: 상승/하락 방향은 반드시 위 '등락률'의 부호를 그대로 따르라. "
+            "뉴스 내용이 반대로 보여도 실제 등락률 부호(+ 상승 / - 하락)를 기준으로 설명하라."
+        )
     try:
         llm = get_llm()
         response = await asyncio.wait_for(
@@ -176,6 +219,5 @@ async def response_node(state: StockPilotState) -> dict:
     except Exception as exc:
         logger.warning(f"Solar 응답 실패, 템플릿으로 폴백: {type(exc).__name__}: {exc}")
         answer = _fallback_answer(price, news_items, docs)
-
     logger.info("💬 [Response] 응답 생성 완료")
     return {"messages": [AIMessage(content=answer)]}

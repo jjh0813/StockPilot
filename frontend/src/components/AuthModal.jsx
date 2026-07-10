@@ -14,7 +14,7 @@ function AuthModal({ onClose, onAuthed }) {
   const [loginId, setLoginId] = useState('')
   const [loginPw, setLoginPw] = useState('')
 
-  // 회원가입 (단계별 입력값은 여기서 유지 → 스텝 리셋돼도 안 지워짐)
+  // 회원가입 (단계별 입력값은 여기서 유지)
   const [suId, setSuId] = useState('')
   const [suPw, setSuPw] = useState('')
   const [suPw2, setSuPw2] = useState('')
@@ -31,10 +31,21 @@ function AuthModal({ onClose, onAuthed }) {
     }
   }
 
+  // 각 단계 입력 검증 — 통과해야 '다음/가입 완료' 진행
+  function validateSignupStep(step) {
+    if (step === 1) {
+      if (suId.trim().length < 2) { setError('아이디를 2자 이상 입력해주세요.'); return false }
+    } else if (step === 2) {
+      if (suPw.length < 4) { setError('비밀번호는 4자 이상이어야 해요.'); return false }
+    } else if (step === 3) {
+      if (suPw2.length < 1) { setError('비밀번호 확인을 입력해주세요.'); return false }
+    }
+    setError('')
+    return true
+  }
+
   async function handleSignupComplete() {
     setError('')
-    if (!suId.trim()) return failSignup('아이디를 입력해주세요.')
-    if (suPw.length < 4) return failSignup('비밀번호는 4자 이상이어야 해요.')
     if (suPw !== suPw2) return failSignup('비밀번호가 일치하지 않아요.')
     try {
       const r = await registerUser(suId.trim(), suPw)
@@ -58,7 +69,6 @@ function AuthModal({ onClose, onAuthed }) {
         className="w-full max-w-md rounded-2xl border border-white/15 bg-neutral-900/90 p-6 shadow-2xl backdrop-blur-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 탭 */}
         <div className="mb-5 flex gap-2 rounded-xl bg-white/5 p-1">
           {['login', 'signup'].map((m) => (
             <button
@@ -97,6 +107,8 @@ function AuthModal({ onClose, onAuthed }) {
             backButtonText="이전"
             nextButtonText="다음"
             completeButtonText="가입 완료"
+            disableStepIndicators={true}
+            validateStep={validateSignupStep}
             onFinalStepCompleted={handleSignupComplete}
           >
             <Step>
