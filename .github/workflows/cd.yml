@@ -101,6 +101,6 @@ jobs:
               tar -xzf ~/deploy.tar.gz -C '${DEPLOY_PATH}' &&
               mv '${DEPLOY_PATH}/.env.production' '${DEPLOY_PATH}/.env' &&
               cd '${DEPLOY_PATH}' &&
-              docker compose down || true &&
-              docker compose up -d --build --remove-orphans
+              docker-compose down || true &&
+              docker-compose up -d --build --remove-orphans
             "
