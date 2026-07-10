@@ -1,8 +1,12 @@
 """그래프 노드 — router / rag / tool / response."""
-from langchain_core.messages import AIMessage
+import asyncio
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
 
+from app.core.llm import get_llm
 from app.core.market_time import tag_session
+from app.core.prompts import RAG_GROUNDING, RESPONSE_PROMPT, TOOL_GROUNDING
 from app.graph.state import StockPilotState
 from app.tools.executor import ToolExecutor
 
@@ -87,17 +91,35 @@ def _format_change(change_pct: float | None) -> tuple[str, str]:
     return "―", "보합"
 
 
-async def response_node(state: StockPilotState) -> dict:
-    """등락률과 그 원인 분석을 담은 최종 응답을 생성한다."""
-    price = state.get("price_data") or {}
-    news_items = state.get("news_items") or []
-    docs = state.get("retrieved_docs") or []
-
-    name = price.get("name") or state.get("ticker") or "해당 종목"
+def _tool_context(price: dict, news_items: list[dict]) -> str:
+    """Solar에 넘길 근거 데이터(시세·뉴스)를 텍스트로 정리한다."""
+    lines: list[str] = []
+    name = price.get("name") or "해당 종목"
     change_pct = price.get("change_pct")
     current_price = price.get("current_price")
-
     if change_pct is not None:
+        arrow, direction = _format_change(change_pct)
+        lines.append(f"종목: {name}")
+        lines.append(f"등락률: {arrow} {abs(change_pct):.2f}% {direction}")
+    if current_price is not None:
+        lines.append(f"현재가: {int(current_price):,}원")
+    if news_items:
+        lines.append("관련 뉴스:")
+        for item in news_items[:5]:
+            title = item.get("title", "")
+            source = item.get("source_domain", "")
+            session = item.get("market_session", "")
+            meta = " · ".join(x for x in (source, session) if x)
+            lines.append(f"- {title}" + (f" ({meta})" if meta else ""))
+    return "\n".join(lines)
+
+
+def _fallback_answer(price: dict, news_items: list[dict], docs: list[str]) -> str:
+    """Solar 호출 실패 시 사용하는 템플릿 응답."""
+    change_pct = price.get("change_pct")
+    if change_pct is not None:
+        name = price.get("name") or "해당 종목"
+        current_price = price.get("current_price")
         arrow, direction = _format_change(change_pct)
         lines = [f"{name} {arrow} {abs(change_pct):.2f}% {direction}"]
         if current_price is not None:
@@ -118,11 +140,42 @@ async def response_node(state: StockPilotState) -> dict:
             lines.append("관련 뉴스를 찾지 못했어요.")
         lines.append("")
         lines.append("※ 투자 자문이 아닌 참고용 정보입니다.")
-        answer = "\n".join(lines)
-    elif docs:
-        answer = "\n".join(docs) + "\n\n※ 투자 자문이 아닌 참고용 정보입니다."
-    else:
-        answer = "관련 정보를 찾지 못했어요. 종목명을 다시 알려주세요."
+        return "\n".join(lines)
+    if docs:
+        return "\n".join(docs) + "\n\n※ 투자 자문이 아닌 참고용 정보입니다."
+    return "관련 정보를 찾지 못했어요. 종목명을 다시 알려주세요."
+
+
+async def response_node(state: StockPilotState) -> dict:
+    """수집한 근거를 바탕으로 Solar가 등락률·원인 분석 응답을 생성한다."""
+    price = state.get("price_data") or {}
+    news_items = state.get("news_items") or []
+    docs = state.get("retrieved_docs") or []
+    user_text = _last_user_text(state)
+
+    system = RESPONSE_PROMPT
+    if docs:
+        system += RAG_GROUNDING.format(context="\n\n".join(docs))
+    if price or news_items:
+        system += TOOL_GROUNDING.format(tool_result=_tool_context(price, news_items))
+
+    try:
+        llm = get_llm()
+        response = await asyncio.wait_for(
+            llm.ainvoke(
+                [
+                    SystemMessage(content=system),
+                    HumanMessage(content=user_text or "이 종목에 대해 설명해줘"),
+                ]
+            ),
+            timeout=45,
+        )
+        answer = (response.content or "").strip()
+        if not answer:
+            answer = _fallback_answer(price, news_items, docs)
+    except Exception as exc:
+        logger.warning(f"Solar 응답 실패, 템플릿으로 폴백: {type(exc).__name__}: {exc}")
+        answer = _fallback_answer(price, news_items, docs)
 
     logger.info("💬 [Response] 응답 생성 완료")
     return {"messages": [AIMessage(content=answer)]}
