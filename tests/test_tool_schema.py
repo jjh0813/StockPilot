@@ -1,6 +1,6 @@
 from pydantic import ValidationError
 
-from app.schemas.tools import GetNewsArgs, GetStockPriceArgs
+from app.schemas.tools import GetNewsArgs, GetStockPriceArgs, LookupGlossaryTermArgs
 from app.tools.executor import ToolExecutor
 from app.tools.registry import bind_stockpilot_tools, build_stockpilot_tools
 
@@ -98,6 +98,30 @@ async def test_structured_tool_uses_pydantic_schema_and_executor():
     assert result["success"] is True
 
 
+async def test_structured_tool_exposes_glossary_lookup_schema():
+    class StubExecutor:
+        def __init__(self):
+            self.call = None
+
+        async def execute(self, tool_name, tool_args, session_id):
+            self.call = (tool_name, tool_args, session_id)
+            return {"success": True, "data": {"query": tool_args["query"], "terms": []}}
+
+    executor = StubExecutor()
+    tools = build_stockpilot_tools(executor, session_id="session-1")
+    tool = next(item for item in tools if item.name == "lookup_glossary_term")
+
+    result = await tool.ainvoke({"query": "PER", "limit": 2})
+
+    assert tool.args_schema is LookupGlossaryTermArgs
+    assert executor.call == (
+        "lookup_glossary_term",
+        {"query": "PER", "limit": 2},
+        "session-1",
+    )
+    assert result["success"] is True
+
+
 def test_bind_stockpilot_tools_passes_json_schemas_to_llm():
     class StubLLM:
         def __init__(self):
@@ -118,6 +142,7 @@ def test_bind_stockpilot_tools_passes_json_schemas_to_llm():
         "get_disclosure",
         "find_positive_news_stocks",
         "add_watchlist",
+        "lookup_glossary_term",
     }
     news_tool = next(tool for tool in llm.tools if tool.name == "get_news")
     assert news_tool.args["direction"]["enum"] == ["down", "up", "neutral"]

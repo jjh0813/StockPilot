@@ -98,3 +98,21 @@ def watchlist_item() -> dict[str, Any]:
         "created_at": "2026-07-09T01:30:00+00:00",
         "saved": True,
     }
+
+
+def glossary_term_item() -> dict[str, Any]:
+    """glossary_terms row returned by the structured glossary repository."""
+    return {
+        "id": 1,
+        "term": "PER",
+        "definition": "Price Earnings Ratio. Current price divided by EPS.",
+        "category": "valuation",
+        "aliases": ["Price Earnings Ratio"],
+        "difficulty": "beginner",
+        "example": "PER 10 means price is 10x EPS.",
+        "source_url": "https://example.com/per",
+        "metadata": {},
+        "match_score": 100,
+        "created_at": "2026-07-09T01:30:00+00:00",
+        "updated_at": "2026-07-09T01:30:00+00:00",
+    }

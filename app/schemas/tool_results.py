@@ -148,6 +148,31 @@ class WatchlistResult(ToolResultModel):
     data: WatchlistData
 
 
+class GlossaryTerm(ToolResultModel):
+    id: int | None = None
+    term: str
+    definition: str
+    category: str | None = None
+    aliases: list[str]
+    difficulty: str
+    example: str | None = None
+    source_url: str | None = None
+    metadata: dict[str, object]
+    match_score: int
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class GlossaryTermData(ToolResultModel):
+    query: str
+    terms: list[GlossaryTerm]
+
+
+class GlossaryTermResult(ToolResultModel):
+    success: Literal[True] = True
+    data: GlossaryTermData
+
+
 class ToolErrorResult(ToolResultModel):
     success: Literal[False] = False
     error: str
@@ -160,4 +185,5 @@ TOOL_RESULT_SCHEMAS: dict[ToolName, type[ToolResultModel]] = {
     "get_disclosure": DisclosureResult,
     "find_positive_news_stocks": PositiveNewsStocksResult,
     "add_watchlist": WatchlistResult,
+    "lookup_glossary_term": GlossaryTermResult,
 }

@@ -97,3 +97,22 @@ def test_select_business_report_chunks_excludes_financial_statements():
         "나. 행정기관의 제재현황",
     ]
     assert [chunk["chunk_index"] for chunk in selected] == [0, 1, 2, 3]
+
+
+def test_select_business_report_chunks_caps_large_reports_at_80():
+    chunks = [
+        {
+            "chunk_index": index,
+            "section": (
+                "16. 우발부채와 약정사항" if index >= 110 else "1. 사업의 개요"
+            ),
+            "content": f"사업보고서 내용 {index}",
+        }
+        for index in range(140)
+    ]
+
+    selected = select_business_report_chunks(chunks)
+
+    assert len(selected) == 80
+    assert sum("우발부채" in chunk["section"] for chunk in selected) >= 20
+    assert [chunk["chunk_index"] for chunk in selected] == list(range(80))

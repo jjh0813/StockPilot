@@ -12,6 +12,7 @@ from app.schemas.tools import (
     GetDisclosureArgs,
     GetNewsArgs,
     GetStockPriceArgs,
+    LookupGlossaryTermArgs,
     MarketDirection,
     PricePeriod,
 )
@@ -78,6 +79,13 @@ def build_stockpilot_tools(
             session_id=session_id,
         )
 
+    async def lookup_glossary_term(query: str, limit: int = 5) -> dict:
+        return await tool_executor.execute(
+            "lookup_glossary_term",
+            {"query": query, "limit": limit},
+            session_id=session_id,
+        )
+
     definitions: list[tuple[str, str, type, object]] = [
         (
             "get_stock_price",
@@ -108,6 +116,12 @@ def build_stockpilot_tools(
             "현재 세션의 관심 종목을 Supabase에 저장합니다.",
             AddWatchlistArgs,
             add_watchlist,
+        ),
+        (
+            "lookup_glossary_term",
+            "Look up investment terms in glossary_terms before using fuzzy RAG.",
+            LookupGlossaryTermArgs,
+            lookup_glossary_term,
         ),
     ]
 

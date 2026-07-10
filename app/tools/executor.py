@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from loguru import logger
 
-from app.repositories import disclosure, news, price, watchlist
+from app.repositories import disclosure, glossary, news, price, watchlist
 from app.schemas.tool_results import TOOL_RESULT_SCHEMAS, ToolErrorResult
 from app.schemas.tools import TOOL_ARG_SCHEMAS
 
@@ -63,6 +63,8 @@ class ToolExecutor:
                         session_id=session_id,
                         **validated_args,
                     )
+                case "lookup_glossary_term":
+                    result = await self.lookup_glossary_term(**validated_args)
             result = (
                 TOOL_RESULT_SCHEMAS[tool_name]
                 .model_validate(result)
@@ -214,6 +216,22 @@ class ToolExecutor:
             session_id=session_id,
         )
         return {"success": True, "data": saved}
+
+    async def lookup_glossary_term(
+        self,
+        query: str,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        """Look up investment terms from the structured glossary table."""
+        logger.debug(f"[lookup_glossary_term] query={query}, limit={limit}")
+        terms = await glossary.search_terms(query, limit=limit)
+        return {
+            "success": True,
+            "data": {
+                "query": query,
+                "terms": terms,
+            },
+        }
 
 
 def _normalize_news_item(

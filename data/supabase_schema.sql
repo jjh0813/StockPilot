@@ -91,4 +91,34 @@ create index if not exists document_facts_metadata_idx
 
 alter table public.document_facts enable row level security;
 
+-- Structured glossary table.
+-- Long documents stay in public.documents(pgvector), but dictionary-style
+-- investment terms are stored here for exact term/alias lookup.
+create table if not exists public.glossary_terms (
+  id bigserial primary key,
+  term text not null unique,
+  definition text not null,
+  category text,
+  aliases text[] not null default '{}'::text[],
+  difficulty text not null default 'beginner',
+  example text,
+  source_url text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists glossary_terms_term_lower_idx
+  on public.glossary_terms (lower(term));
+
+create index if not exists glossary_terms_aliases_idx
+  on public.glossary_terms using gin (aliases);
+
+create index if not exists glossary_terms_metadata_idx
+  on public.glossary_terms using gin (metadata);
+
+alter table public.glossary_terms enable row level security;
+
+-- Glossary rows are written by the backend with the service-role key.
+
 -- Information Extract 결과도 backend의 service-role 키로만 저장합니다.

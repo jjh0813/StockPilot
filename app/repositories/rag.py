@@ -46,6 +46,8 @@ _RISK_SECTION_KEYWORDS = (
     "사채관리계약",
     "재무제표 재작성",
 )
+MAX_BUSINESS_REPORT_CHUNKS = 80
+MIN_RISK_CHUNKS = 20
 
 
 def get_embeddings() -> UpstageEmbeddings:
@@ -224,6 +226,16 @@ def select_business_report_chunks(chunks: list[dict]) -> list[dict]:
 
     if not selected:
         raise ValueError("사업보고서에서 적재할 사업 내용 청크를 찾지 못했습니다.")
+
+    if len(selected) > MAX_BUSINESS_REPORT_CHUNKS:
+        required_risk_ids = {id(chunk) for chunk in risk_chunks[:MIN_RISK_CHUNKS]}
+        remaining_slots = MAX_BUSINESS_REPORT_CHUNKS - len(required_risk_ids)
+        fill_ids = [
+            id(chunk) for chunk in selected if id(chunk) not in required_risk_ids
+        ][:remaining_slots]
+        limited_ids = required_risk_ids | set(fill_ids)
+        selected = [chunk for chunk in selected if id(chunk) in limited_ids]
+
     for index, chunk in enumerate(selected):
         chunk["chunk_index"] = index
     logger.info(
@@ -294,6 +306,19 @@ async def save_chunks(
     )
     logger.info(f"RAG 적재 완료: source_id={source_id}, chunks={len(rows)}")
     return len(rows)
+
+
+async def source_exists(source_id: str) -> bool:
+    """동일한 원문이 이미 RAG 테이블에 적재됐는지 확인합니다."""
+    client = await get_supabase_client()
+    result = await (
+        client.table("documents")
+        .select("id")
+        .eq("source_id", source_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(result.data)
 
 
 async def _embed_batch_with_retry(
