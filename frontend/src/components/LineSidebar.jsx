@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { Fragment, useRef, useState, useCallback, useEffect } from 'react';
 import './LineSidebar.css';
 
 const FALLOFF_CURVES = {
@@ -9,6 +9,8 @@ const FALLOFF_CURVES = {
 
 const LineSidebar = ({
   items = [],
+  stars = [],
+  separatorAfter = null,
   accentColor = '#34d399',
   textColor = '#c4c4c4',
   markerColor = '#6c6c6c',
@@ -26,6 +28,8 @@ const LineSidebar = ({
   smoothing = 100,
   defaultActive = null,
   onItemClick,
+  onItemDelete,
+  onItemFavorite,
   className = ''
 }) => {
   const listRef = useRef(null);
@@ -37,6 +41,7 @@ const LineSidebar = ({
   const activeRef = useRef(defaultActive);
   const smoothingRef = useRef(smoothing);
   const [activeIndex, setActiveIndex] = useState(defaultActive);
+  const [menu, setMenu] = useState(null); // 우클릭 메뉴 { index, x, y }
 
   activeRef.current = activeIndex;
   smoothingRef.current = smoothing;
@@ -95,6 +100,14 @@ const LineSidebar = ({
     startLoop();
   }, [startLoop]);
 
+  const handleItemEnter = useCallback(
+    index => {
+      targetsRef.current[index] = 1;
+      startLoop();
+    },
+    [startLoop]
+  );
+
   const handleClick = useCallback(
     (index, label) => {
       setActiveIndex(index);
@@ -102,6 +115,24 @@ const LineSidebar = ({
     },
     [onItemClick]
   );
+
+  const handleContextMenu = useCallback((e, index) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenu({ index, x: e.clientX - rect.left, y: e.clientY - rect.top });
+  }, []);
+
+  useEffect(() => {
+    if (!menu) return undefined;
+    const close = () => setMenu(null);
+    document.addEventListener('click', close);
+    document.addEventListener('scroll', close, true);
+    return () => {
+      document.removeEventListener('click', close);
+      document.removeEventListener('scroll', close, true);
+    };
+  }, [menu]);
 
   useEffect(() => {
     startLoop();
@@ -132,21 +163,58 @@ const LineSidebar = ({
     >
       <ul ref={listRef} className="line-sidebar__list" onPointerMove={handlePointerMove} onPointerLeave={handlePointerLeave}>
         {items.map((label, index) => (
-          <li
-            key={`${label}-${index}`}
-            ref={el => {
-              itemRefs.current[index] = el;
-            }}
-            className="line-sidebar__item"
-            aria-current={activeIndex === index ? 'true' : undefined}
-            onClick={() => handleClick(index, label)}
-          >
-            {showMarker && <span className="line-sidebar__marker" aria-hidden="true" />}
-            <span className="line-sidebar__label">
-              {showIndex && <span className="line-sidebar__index">{String(index + 1).padStart(2, '0')}</span>}
-              <span className="line-sidebar__text">{label}</span>
-            </span>
-          </li>
+          <Fragment key={`${label}-${index}`}>
+            <li
+              ref={el => {
+                itemRefs.current[index] = el;
+              }}
+              className="line-sidebar__item"
+              aria-current={activeIndex === index ? 'true' : undefined}
+              onPointerEnter={() => handleItemEnter(index)}
+              onClick={() => handleClick(index, label)}
+              onContextMenu={e => handleContextMenu(e, index)}
+            >
+              {showMarker && <span className="line-sidebar__marker" aria-hidden="true" />}
+              <span className="line-sidebar__label">
+                {showIndex && <span className="line-sidebar__index">{String(index + 1).padStart(2, '0')}</span>}
+                <span className="line-sidebar__text">{label}</span>
+                {stars[index] && <span className="line-sidebar__star" aria-label="즐겨찾기">★</span>}
+              </span>
+              {menu && menu.index === index && (
+                <div
+                  className="absolute z-40 min-w-[9rem] overflow-hidden rounded-lg border border-white/15 bg-neutral-900/95 shadow-xl backdrop-blur"
+                  style={{ left: menu.x, top: menu.y }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      onItemFavorite?.(index);
+                      setMenu(null);
+                    }}
+                    className="flex w-full items-center gap-2 whitespace-nowrap px-4 py-2 text-left text-sm text-yellow-300 transition-colors hover:bg-yellow-400/15"
+                  >
+                    {stars[index] ? '★ 즐겨찾기 해제' : '☆ 즐겨찾기 추가'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      onItemDelete?.(index);
+                      setMenu(null);
+                    }}
+                    className="flex w-full items-center gap-2 whitespace-nowrap px-4 py-2 text-left text-sm text-red-300 transition-colors hover:bg-red-500/20"
+                  >
+                    🗑 대화 삭제
+                  </button>
+                </div>
+              )}
+            </li>
+            {separatorAfter != null && index === separatorAfter - 1 && (
+              <li className="line-sidebar__separator" aria-hidden="true" />
+            )}
+          </Fragment>
         ))}
       </ul>
     </nav>

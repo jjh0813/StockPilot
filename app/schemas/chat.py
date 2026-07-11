@@ -42,7 +42,7 @@ class ChatResponse(BaseModel):
 
 
 # SSE 이벤트 타입
-StreamEventType = Literal["thinking", "token", "tool", "response", "error", "done"]
+StreamEventType = Literal["thinking", "token", "tool", "response", "glossary", "error", "done"]
 
 
 class StreamEvent(BaseModel):
@@ -53,6 +53,7 @@ class StreamEvent(BaseModel):
         token    : content(LLM 토큰 한 조각)
         tool     : tool_name (+ tool_result 요약)
         response : content(최종 응답) + tool_used
+        glossary : terms(답변 안에서 발견된 용어 사전 매칭 목록)
         error    : error(에러 메시지)
         done     : 필드 없음(종료 신호)
     """
@@ -63,6 +64,9 @@ class StreamEvent(BaseModel):
     tool_name: Optional[str] = Field(default=None, description="실행된 도구 이름")
     tool_result: Optional[Any] = Field(default=None, description="도구 실행 결과")
     tool_used: Optional[str] = Field(default=None, description="최종 응답에 쓰인 도구")
+    terms: Optional[list[dict[str, Any]]] = Field(
+        default=None, description="답변 텍스트 안에서 매칭된 용어 사전 항목"
+    )
     error: Optional[str] = Field(default=None, description="에러 메시지")
 
     def to_sse(self) -> str:

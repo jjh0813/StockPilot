@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import threading
 import os
 import re
 from datetime import date, datetime, timedelta
@@ -22,7 +23,10 @@ _PERIOD_DAYS = {
 }
 
 # 기본 유니버스는 KRX 로그인 없이도 종목명을 코드로 바꿀 수 있다.
+# 코드로 시세를 조회하는 경로(get_market_ohlcv_by_date)는 KRX 로그인이 필요 없으므로,
+# 자주 묻는 종목의 코드를 넉넉히 하드코딩해 로그인 없이도 차트가 뜨게 한다.
 _KNOWN_TICKERS = {
+    # 대형주
     "삼성전자": "005930",
     "SK하이닉스": "000660",
     "LG에너지솔루션": "373220",
@@ -30,17 +34,75 @@ _KNOWN_TICKERS = {
     "현대차": "005380",
     "기아": "000270",
     "NAVER": "035420",
-    "네이버": "035420",
     "카카오": "035720",
     "POSCO홀딩스": "005490",
-    "포스코홀딩스": "005490",
     "셀트리온": "068270",
+    "LG화학": "051910",
+    "삼성SDI": "006400",
+    "삼성전기": "009150",
+    "삼성물산": "028260",
+    "LG전자": "066570",
+    "현대모비스": "012330",
+    "SK이노베이션": "096770",
+    "SK텔레콤": "017670",
+    "KT": "030200",
+    "LG유플러스": "032640",
+    "한국전력": "015760",
+    "삼성생명": "032830",
+    "삼성화재": "000810",
+    "KB금융": "105560",
+    "신한지주": "055550",
+    "하나금융지주": "086790",
+    "우리금융지주": "316140",
+    "메리츠금융지주": "138040",
+    "카카오뱅크": "323410",
+    "아모레퍼시픽": "090430",
+    "현대글로비스": "086280",
+    # 방산·조선·중공업
+    "한화오션": "042660",
+    "한화에어로스페이스": "012450",
+    "한국항공우주": "047810",
+    "LIG넥스원": "079550",
+    "현대로템": "064350",
+    "삼성중공업": "010140",
+    "HD현대중공업": "329180",
+    "두산에너빌리티": "034020",
+    "두산로보틱스": "454910",
+    "HMM": "011200",
+    "대한항공": "003490",
+    # 2차전지·소재
+    "에코프로": "086520",
+    "에코프로비엠": "247540",
+    "포스코퓨처엠": "003670",
+    "포스코인터내셔널": "047050",
+    "한화솔루션": "009830",
+    "LG디스플레이": "034220",
+    # 게임·엔터·인터넷
+    "크래프톤": "259960",
+    "엔씨소프트": "036570",
+    "넷마블": "251270",
+    "카카오게임즈": "293490",
+    "하이브": "352820",
+    "SK스퀘어": "402340",
+    # 흔한 별칭 (표시는 정식명으로)
+    "네이버": "035420",
+    "포스코홀딩스": "005490",
+    "엘지에너지솔루션": "373220",
+    "엘지화학": "051910",
+    "엘지전자": "066570",
 }
-_TICKER_NAMES = {
-    ticker: name
-    for name, ticker in _KNOWN_TICKERS.items()
-    if name not in {"네이버", "포스코홀딩스"}
-}
+# 별칭 표기는 code→표시이름 매핑에서 제외해 정식명이 보이게 한다.
+_ALIAS_NAMES = {"네이버", "포스코홀딩스", "엘지에너지솔루션", "엘지화학", "엘지전자"}
+_TICKER_NAMES = {}
+for _name, _ticker in _KNOWN_TICKERS.items():
+    if _name in _ALIAS_NAMES:
+        continue
+    _TICKER_NAMES.setdefault(_ticker, _name)
+
+# 전체 상장 종목 이름↔코드 인덱스 (pykrx 공개 데이터, KRX 로그인 불필요). 최초 1회만 구축 후 캐시.
+_NAME_INDEX: list[tuple[str, str]] | None = None   # (정규화된_이름, 코드), 긴 이름 우선 정렬
+_CODE_NAME: dict[str, str] = {}
+_INDEX_LOCK = threading.Lock()
 
 
 class PriceDataError(RuntimeError):
@@ -48,22 +110,27 @@ class PriceDataError(RuntimeError):
 
 
 async def resolve_ticker(query: str) -> str:
-    """6자리 종목코드 또는 회사명을 KRX 종목코드로 변환합니다."""
+    """6자리 종목코드 또는 회사명을 KRX 종목코드로 변환합니다.
+
+    pykrx의 종목 목록/이름 조회는 로그인 없이 되는 공개 데이터이므로,
+    기본 종목이 아니어도 전체 상장 종목에서 이름으로 코드를 찾는다.
+    """
     normalized = _normalize_name(query)
     if re.fullmatch(r"\d{6}", normalized):
         return normalized
 
+    # 1) 기본 유니버스 정확 일치 (pykrx 없이 즉시)
     known = {_normalize_name(name): ticker for name, ticker in _KNOWN_TICKERS.items()}
     if normalized in known:
         return known[normalized]
 
-    if not settings.krx_id or not settings.krx_pw:
-        raise PriceDataError(
-            f"기본 종목 목록에서 {query!r}을 찾지 못했습니다. "
-            "임의 종목명 검색에는 KRX_ID와 KRX_PW가 필요합니다."
-        )
+    # 2) 기본 유니버스 부분 일치 (질문에 군더더기가 섞여 있어도 인식)
+    for name, ticker in sorted(_KNOWN_TICKERS.items(), key=lambda kv: len(kv[0]), reverse=True):
+        if _normalize_name(name) in normalized:
+            return ticker
 
-    return await asyncio.to_thread(_resolve_ticker_from_krx, normalized)
+    # 3) 전체 상장 종목 인덱스에서 해석 (로그인 불필요)
+    return await asyncio.to_thread(_resolve_ticker_from_index, normalized)
 
 
 async def get_ohlcv(ticker: str, start: str, end: str) -> list[dict[str, Any]]:
@@ -174,7 +241,7 @@ async def get_stock_snapshot(
     fundamentals = await get_fundamentals(code, as_of=end_date.isoformat())
     return {
         "ticker": code,
-        "name": _TICKER_NAMES.get(code, ticker),
+        "name": _TICKER_NAMES.get(code) or _CODE_NAME.get(code) or ticker,
         "as_of": latest["date"],
         "current_price": current_price,
         "previous_close": previous_close,
@@ -198,22 +265,59 @@ def _get_stock_api() -> Any:
     return stock
 
 
-def _resolve_ticker_from_krx(normalized_query: str) -> str:
+def _build_name_index() -> None:
+    """전체 상장 종목의 (정규화 이름 → 코드) 인덱스를 1회 구축해 캐시한다."""
+    global _NAME_INDEX
     stock = _get_stock_api()
-    lookup_date = date.today().strftime("%Y%m%d")
-    try:
-        tickers = stock.get_market_ticker_list(lookup_date, market="ALL")
-        matches = [
-            ticker
-            for ticker in tickers
-            if _normalize_name(stock.get_market_ticker_name(ticker)) == normalized_query
-        ]
-    except Exception as exc:
-        raise PriceDataError(f"KRX 종목 검색에 실패했습니다: {exc}") from exc
+    codes: list[str] = []
+    for back in range(0, 8):  # 주말·휴장 대비 최근 영업일까지 후퇴
+        lookup_date = (date.today() - timedelta(days=back)).strftime("%Y%m%d")
+        try:
+            codes = stock.get_market_ticker_list(lookup_date, market="ALL")
+        except Exception:
+            codes = []
+        if codes:
+            break
 
-    if not matches:
-        raise PriceDataError(f"종목을 찾지 못했습니다: {normalized_query}")
-    return matches[0]
+    pairs: list[tuple[str, str]] = []
+    for code in codes:
+        try:
+            name = stock.get_market_ticker_name(code)
+        except Exception:
+            continue
+        if not name:
+            continue
+        _CODE_NAME[code] = name
+        pairs.append((_normalize_name(name), code))
+    pairs.sort(key=lambda pair: len(pair[0]), reverse=True)  # 긴 이름 우선
+    _NAME_INDEX = pairs
+    logger.info(f"📇 [Price] 종목 인덱스 구축 완료: {len(pairs)}개")
+
+
+def _ensure_index() -> list[tuple[str, str]]:
+    global _NAME_INDEX
+    if _NAME_INDEX is None:
+        with _INDEX_LOCK:
+            if _NAME_INDEX is None:
+                _build_name_index()
+    return _NAME_INDEX or []
+
+
+def _resolve_ticker_from_index(normalized_query: str) -> str:
+    try:
+        index = _ensure_index()
+    except Exception as exc:
+        raise PriceDataError(f"KRX 종목 목록 조회에 실패했습니다: {exc}") from exc
+
+    # 정확 일치 우선
+    for name, code in index:
+        if name == normalized_query:
+            return code
+    # 부분 문자열(긴 이름 우선): "한화오션가", "한화오션주가어때" 등에서 "한화오션" 인식
+    for name, code in index:
+        if len(name) >= 2 and name in normalized_query:
+            return code
+    raise PriceDataError(f"종목을 찾지 못했습니다: {normalized_query}")
 
 
 def _parse_date(value: str | None) -> date:

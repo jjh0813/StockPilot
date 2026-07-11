@@ -8,6 +8,7 @@ from loguru import logger
 
 from app.graph.graph import get_stockpilot_graph
 from app.graph.state import create_initial_state
+from app.repositories.glossary import find_terms_in_text, list_all_terms
 from app.schemas.chat import ChatRequest, ChatResponse, StreamEvent
 
 router = APIRouter()
@@ -31,6 +32,8 @@ def _tool_payload(node_output: dict) -> dict:
     """tool 노드 결과에서 프론트가 쓸 시세·뉴스 요약을 추린다."""
     price = node_output.get("price_data") or {}
     news = node_output.get("news_items") or []
+    disclosures = node_output.get("disclosures") or []
+    fundamentals = price.get("fundamentals") or None
     return {
         "price": (
             {
@@ -38,6 +41,12 @@ def _tool_payload(node_output: dict) -> dict:
                 "ticker": price.get("ticker"),
                 "change_pct": price.get("change_pct"),
                 "current_price": price.get("current_price"),
+                "as_of": price.get("as_of"),
+                "period": price.get("period"),
+                # 차트용 일봉 시계열 (date, open, high, low, close, volume, change_pct)
+                "ohlcv": price.get("ohlcv") or [],
+                # 좌측 패널 하단 재무지표 카드용 (PER/PBR/EPS/BPS/DIV/DPS)
+                "fundamentals": fundamentals,
             }
             if price
             else None
@@ -51,7 +60,29 @@ def _tool_payload(node_output: dict) -> dict:
             }
             for item in news[:5]
         ],
+        # 좌측 패널 하단 "공시정보" 카드용 (4번째 도구: get_disclosure)
+        "disclosures": [
+            {
+                "title": d.get("report_name") or d.get("title"),
+                "url": d.get("source_url") or d.get("url"),
+                "date": d.get("received_date") or d.get("date"),
+                "corp": d.get("corp_name"),
+            }
+            for d in disclosures[:8]
+        ],
     }
+
+
+async def _match_glossary_terms(answer_text: str) -> list[dict]:
+    """답변 텍스트에서 사전에 등록된 투자 용어를 찾는다. 실패해도 응답 자체는 막지 않는다."""
+    if not answer_text.strip():
+        return []
+    try:
+        terms = await list_all_terms()
+        return find_terms_in_text(answer_text, terms)
+    except Exception:
+        logger.warning("용어 매칭 실패 — 밑줄 각주 없이 진행")
+        return []
 
 
 @router.post("/", response_model=ChatResponse)
@@ -76,6 +107,7 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
     graph = get_stockpilot_graph()
     tool_used = None
     streamed_token = False
+    answer_text = ""
     try:
         async for mode, chunk in graph.astream(
             _build_state(request),
@@ -91,6 +123,7 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
                     text = message_chunk.content or ""
                     if text:
                         streamed_token = True
+                        answer_text += text
                         yield StreamEvent(
                             type="token",
                             node="response",
@@ -119,6 +152,7 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
                 if node_name == "response" and not streamed_token:
                     messages = node_output.get("messages") or []
                     content = messages[-1].content if messages else ""
+                    answer_text = content
                     yield StreamEvent(
                         type="response",
                         node="response",
@@ -129,6 +163,12 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
         # 토큰으로 흘린 경우: 완료 신호로 tool_used만 담은 response 이벤트
         if streamed_token:
             yield StreamEvent(type="response", node="response", tool_used=tool_used).to_sse()
+
+        # 답변 텍스트 안에 등장하는 투자 용어를 찾아 밑줄 각주용으로 흘려보낸다.
+        terms = await _match_glossary_terms(answer_text)
+        if terms:
+            yield StreamEvent(type="glossary", node="response", terms=terms).to_sse()
+
         yield StreamEvent(type="done").to_sse()
     except Exception:
         logger.exception(f"스트리밍 처리 실패: session={request.session_id}")

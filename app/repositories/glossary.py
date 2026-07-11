@@ -75,6 +75,69 @@ async def get_term(term: str) -> dict[str, Any] | None:
     return matches[0] if matches else None
 
 
+async def list_all_terms() -> list[dict[str, Any]]:
+    """전체 용어 목록을 반환합니다 (답변 텍스트 내 용어 매칭용)."""
+    client = await get_supabase_client()
+    result = await (
+        client.table("glossary_terms")
+        .select(GLOSSARY_COLUMNS)
+        .limit(1000)
+        .execute()
+    )
+    return [_normalize_row(row) for row in (result.data or [])]
+
+
+def find_terms_in_text(
+    text: str,
+    terms: list[dict[str, Any]],
+    *,
+    limit: int = 12,
+) -> list[dict[str, Any]]:
+    """답변 텍스트 안에 등장하는 용어(사전 표제어·별칭)를 찾아냅니다.
+
+    나무위키식 밑줄 각주에 쓸 수 있게, 실제로 본문에 등장한 표기(matched_text)와
+    정의를 함께 돌려준다. 같은 자리에 여러 용어가 겹치면 더 긴 표기를 우선한다.
+    """
+    if not text.strip() or not terms:
+        return []
+
+    # (표기, term row) 후보를 만들고 긴 표기부터 검사해 부분 문자열 중복을 줄인다.
+    candidates: list[tuple[str, dict[str, Any]]] = []
+    for row in terms:
+        surface_forms = {row.get("term", "")} | set(row.get("aliases") or [])
+        for surface in surface_forms:
+            surface = (surface or "").strip()
+            if len(surface) >= 2:
+                candidates.append((surface, row))
+    candidates.sort(key=lambda pair: len(pair[0]), reverse=True)
+
+    matched: dict[str, dict[str, Any]] = {}
+    occupied: list[tuple[int, int]] = []
+
+    for surface, row in candidates:
+        term_key = row.get("term", "")
+        if term_key in matched:
+            continue
+        start = text.find(surface)
+        if start < 0:
+            continue
+        end = start + len(surface)
+        if any(start < o_end and end > o_start for o_start, o_end in occupied):
+            continue
+        occupied.append((start, end))
+        matched[term_key] = {
+            "term": term_key,
+            "matched_text": surface,
+            "definition": row.get("definition", ""),
+            "category": row.get("category"),
+            "example": row.get("example"),
+        }
+        if len(matched) >= limit:
+            break
+
+    return list(matched.values())
+
+
 def rank_glossary_terms(
     rows: list[dict[str, Any]],
     query: str,

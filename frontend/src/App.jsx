@@ -1,15 +1,16 @@
 import { useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 
 import Aurora from './components/Aurora'
 import AuthModal from './components/AuthModal'
 import ChatPanel from './components/ChatPanel'
 import NavBar from './components/NavBar'
 import Sidebar from './components/Sidebar'
+import StockPanel from './components/StockPanel'
 import { getUsername, loadConversations, saveConversations, setAuth } from './lib/api'
 
 const AURORA_COLORS = ['#052e21', '#34d399', '#065f46']
 const ANALYSIS_HINT = '종목명을 입력하면 등락의 원인을 분석해드려요. (예: 삼성전자)'
-const GLOSSARY_HINT = '궁금한 투자 용어를 입력해보세요. (예: PER, PBR, 유상증자, 공매도)'
 
 function deriveTitle(messages, fallback) {
   const firstUser = (messages || []).find((m) => m.role === 'user')
@@ -24,7 +25,6 @@ function App() {
   const [activeId, setActiveId] = useState(null)
   const [started, setStarted] = useState(false)
   const [seed, setSeed] = useState(null)
-  const [hint, setHint] = useState(ANALYSIS_HINT)
   const [username, setUsername] = useState(() => getUsername() || null)
   const [showAuth, setShowAuth] = useState(false)
 
@@ -33,14 +33,13 @@ function App() {
     saveConversations(list)
   }
 
-  function newConversation(seedText = '', convHint = ANALYSIS_HINT) {
+  function newConversation(seedText = '') {
     const id = 'c-' + Date.now()
     const sessionId = 'web-' + Math.random().toString(36).slice(2)
-    const conv = { id, sessionId, title: '새 대화', messages: [], createdAt: Date.now() }
+    const conv = { id, sessionId, title: '새 대화', messages: [], insights: [], favorite: false, createdAt: Date.now() }
     persist([conv, ...conversations])
     setActiveId(id)
     setStarted(true)
-    setHint(convHint)
     setSeed({ text: seedText, nonce: Date.now() })
   }
 
@@ -55,7 +54,6 @@ function App() {
     setActiveId(id)
     setStarted(true)
     setSeed(null)
-    setHint(ANALYSIS_HINT)
   }
 
   function handleMessagesChange(id, messages) {
@@ -68,27 +66,44 @@ function App() {
     })
   }
 
-  function deleteConversation(id) {
+  // 종목 질문마다 결과를 누적한다 → 같은 대화창에서 다른 종목을 물으면
+  // 기존 종목 카드는 그대로 두고 아래에 새 종목 차트/뉴스/공시가 쌓인다.
+  function handleInsight(id, insight) {
     setConversations((prev) => {
-      const next = prev.filter((c) => c.id !== id)
+      const next = prev.map((c) =>
+        c.id === id ? { ...c, insights: [...(c.insights || []), insight] } : c
+      )
       saveConversations(next)
       return next
     })
+  }
+
+  function deleteConversation(id) {
+    const next = conversations.filter((c) => c.id !== id)
+    persist(next)
     if (activeId === id) {
-      setActiveId(null)
-      setStarted(false)
+      if (next.length > 0) {
+        // 즐겨찾기 우선 정렬 기준으로 남은 대화 중 하나로 이동
+        const sorted = [...next].sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0))
+        setActiveId(sorted[0].id)
+        setStarted(true)
+      } else {
+        setActiveId(null)
+        setStarted(false)
+      }
     }
   }
 
-  function handleNav(kind) {
-    if (kind === 'screener') newConversation('오늘 급등하거나 급락한 종목과 그 이유를 알려줘')
-    else if (kind === 'glossary') newConversation('', GLOSSARY_HINT)
-    else newConversation('', ANALYSIS_HINT) // 종목 분석
+  function toggleFavorite(id) {
+    persist(conversations.map((c) => (c.id === id ? { ...c, favorite: !c.favorite } : c)))
   }
+
   function handleAuthed(name) { setUsername(name); setShowAuth(false) }
   function handleLogout() { setAuth(null); setUsername(null) }
 
   const active = conversations.find((c) => c.id === activeId) || null
+  const insights = active?.insights || []
+  const hasInsight = insights.length > 0
 
   return (
     <div className="relative min-h-screen bg-black text-neutral-100">
@@ -99,20 +114,27 @@ function App() {
       <NavBar
         username={username}
         onHome={goHome}
-        onNav={handleNav}
         onLoginClick={() => setShowAuth(true)}
         onLogout={handleLogout}
       />
 
       <Sidebar
+        visible={started}
         conversations={conversations}
         activeId={activeId}
         onSelect={selectConversation}
         onNew={() => newConversation('')}
         onDelete={deleteConversation}
+        onToggleFavorite={toggleFavorite}
       />
 
-      <main className="relative z-10 mx-auto flex min-h-screen max-w-2xl flex-col px-4 pt-28 pb-8">
+      <main
+        className={
+          started && active
+            ? 'relative z-10 flex h-screen flex-col overflow-hidden px-4 pb-4 pt-24 lg:pl-72 lg:pr-8'
+            : 'relative z-10 mx-auto flex min-h-screen max-w-2xl flex-col px-4 pb-8 pt-28'
+        }
+      >
         {!started || !active ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center animate-fade-in">
             <span className="mb-4 block font-mono text-xs uppercase tracking-[0.35em] text-neutral-400 drop-shadow">
@@ -133,19 +155,51 @@ function App() {
             </button>
           </div>
         ) : (
-          <div className="flex flex-1 flex-col animate-fade-in-up">
-            <ChatPanel
-              key={active.id}
-              sessionId={active.sessionId}
-              initialMessages={active.messages}
-              seed={seed}
-              hint={hint}
-              onMessagesChange={(msgs) => handleMessagesChange(active.id, msgs)}
-            />
+          <div className="flex min-h-0 flex-1 items-stretch gap-6 animate-fade-in-up">
+            {/* 왼쪽(가운데) 인사이트 패널: 자체적으로 세로 스크롤 → 오른쪽 채팅과 스크롤 분리.
+                같은 대화에서 종목을 여러 번 물으면 카드가 위에서 아래로 쌓인다. */}
+            <AnimatePresence>
+              {hasInsight && (
+                <motion.div
+                  key="insight"
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: '62%', opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+                  className="hidden min-h-0 overflow-hidden lg:block"
+                >
+                  <div className="no-scrollbar flex h-full w-full flex-col gap-8 overflow-y-auto px-2 pb-2 pt-1">
+                    {insights.map((ins, i) => (
+                      <StockPanel
+                        key={i}
+                        price={ins.price}
+                        news={ins.news}
+                        disclosures={ins.disclosures}
+                      />
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <motion.div
+              layout
+              className={`flex min-h-0 w-full max-w-2xl flex-1 flex-col ${hasInsight ? 'mx-auto lg:mx-0' : 'mx-auto'}`}
+            >
+              <ChatPanel
+                key={active.id}
+                sessionId={active.sessionId}
+                initialMessages={active.messages}
+                seed={seed}
+                hint={ANALYSIS_HINT}
+                onMessagesChange={(msgs) => handleMessagesChange(active.id, msgs)}
+                onInsight={(insight) => handleInsight(active.id, insight)}
+              />
+            </motion.div>
           </div>
         )}
 
-        <p className="mt-6 text-center font-mono text-xs text-neutral-500 drop-shadow">
+        <p className="mt-3 shrink-0 text-center font-mono text-xs text-neutral-500 drop-shadow">
           ※ 투자 자문이 아닌 참고용 정보입니다.
         </p>
       </main>
