@@ -19,9 +19,12 @@ jobs:
 
       - name: Validate required secrets
         shell: bash
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCE_SSH_USER: ${{ vars.GCE_SSH_USER }}
         run: |
-          test -n "${{ secrets.GCP_SA_KEY }}" || { echo "Missing secret: GCP_SA_KEY"; exit 1; }
-          test -n "${{ vars.GCE_SSH_USER }}" || { echo "Missing variable: GCE_SSH_USER"; exit 1; }
+          [[ -n "$GCP_SA_KEY" ]] || { echo "Missing secret: GCP_SA_KEY"; exit 1; }
+          [[ -n "$GCE_SSH_USER" ]] || { echo "Missing variable: GCE_SSH_USER"; exit 1; }
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
