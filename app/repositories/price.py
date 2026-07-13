@@ -263,7 +263,12 @@ def _get_stock_api() -> Any:
         os.environ.setdefault("KRX_ID", settings.krx_id)
         os.environ.setdefault("KRX_PW", settings.krx_pw)
 
-    # pykrx는 import 시 KRX 세션을 초기화하므로 자격 증명 설정 후 지연 import한다.
+    # pykrx는 import 시 KRX 세션을 초기화하며 로그인 ID를 stdout에 출력할 수 있으므로
+    # 자격 증명 설정 후, 민감 로그를 억제한 상태에서 지연 import한다.
+    return _call_with_suppressed_stdio(_import_stock_api)
+
+
+def _import_stock_api() -> Any:
     from pykrx import stock
 
     return stock
