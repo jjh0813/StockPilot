@@ -46,6 +46,21 @@ def test_chat_stream_event_sequence(mock_tools):
     assert any(t in ("token", "response") for t in types)
 
 
+def test_chat_stream_blocks_out_of_scope_without_tool():
+    r = client.post(
+        "/api/v1/chat/stream",
+        json={"message": "배고프다", "session_id": "out-of-scope-1"},
+    )
+
+    assert r.status_code == 200
+    events = _parse_sse(r.text)
+    types = [event["type"] for event in events]
+    assert "tool" not in types
+    response = next(event for event in events if event["type"] == "response")
+    assert "주식 리서치 전용" in response["content"]
+    assert events[-1]["type"] == "done"
+
+
 def test_chat_stream_blocks_buy_sell_advice_request():
     r = client.post(
         "/api/v1/chat/stream",

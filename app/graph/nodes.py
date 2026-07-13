@@ -18,11 +18,28 @@ _executor = ToolExecutor()
 # 세션별 직전 분석 종목 (후속 질문 문맥 유지용)
 _SESSION_TICKER: dict[str, str] = {}
 
+OUT_OF_SCOPE_MESSAGE = (
+    "저는 주식 리서치 전용 도우미라 주식·종목·뉴스·공시·재무·투자용어와 "
+    "관련된 질문만 답변할 수 있어요. 예를 들어 “삼성전자 어때?”, "
+    "“PER이 뭐야?”, “최근 급등한 종목 있어?”처럼 물어봐 주세요."
+)
+
 # 용어·개념 질문 힌트 → rag로 분기
 RAG_HINTS = (
     "뭐야", "무슨 뜻", "뜻이", "설명", "per", "pbr",
     "유상증자", "공매도", "배당", "리스크",
     "용어", "목록", "리스트",
+)
+
+INVESTMENT_DOMAIN_HINTS = (
+    "주식", "종목", "주가", "시세", "등락", "가격",
+    "상승", "하락", "급등", "급락", "강세", "약세",
+    "뉴스", "공시", "사업보고서", "분기보고서", "반기보고서",
+    "재무", "재무제표", "실적", "매출", "영업이익", "순이익",
+    "per", "pbr", "eps", "bps", "roe", "roa",
+    "배당", "공매도", "유상증자", "무상증자",
+    "투자", "투자용어", "용어", "리스크", "호재", "악재", "코스피", "코스닥", "나스닥",
+    "금리", "환율", "반도체", "온실가스", "esg",
 )
 
 # 급등·급락 스크리너 힌트 (특정 종목 없이 "요즘 뜨는 종목" 류)
@@ -34,6 +51,12 @@ SCREENER_HINTS = (
 # 후속 질문 힌트 (종목명 없이 직전 종목을 이어 묻는 경우)
 FOLLOWUP_HINTS = (
     "왜", "그럼", "그래서", "이유", "더", "자세", "어떻게", "그건", "방금", "전망",
+)
+
+FOLLOWUP_DOMAIN_HINTS = (
+    "왜", "이유", "더", "자세", "전망", "어떻게", "그건", "방금",
+    "떨어", "하락", "올라", "상승", "급락", "급등",
+    "뉴스", "공시", "재무", "실적", "리스크", "보고서",
 )
 
 # 종목명 사전(ticker 추출용). 실제 종목 매핑은 이후 확장.
@@ -83,6 +106,11 @@ def _clean_ticker(text: str) -> str:
     return cleaned or text.strip()
 
 
+def _has_investment_domain(text: str) -> bool:
+    lower = text.lower()
+    return any(hint in lower for hint in INVESTMENT_DOMAIN_HINTS)
+
+
 async def router_node(state: StockPilotState) -> dict:
     """사용자 의도를 분류하고 대상 종목을 추출한다."""
     text = _last_user_text(state)
@@ -104,18 +132,29 @@ async def router_node(state: StockPilotState) -> dict:
         return {"intent": "tool", "screen": True, "ticker": None}
 
     is_rag = any(hint in lower for hint in RAG_HINTS)
+    is_domain_query = _has_investment_domain(text)
     if matched_stock:
         _SESSION_TICKER[session_id] = matched_stock  # 문맥 저장
         ticker = matched_stock
-    elif is_rag:
+        intent = "rag" if is_rag else "tool"
+    elif is_rag and is_domain_query:
         ticker = _clean_ticker(text)
+        intent = "rag"
     else:
         # 후속 질문(짧거나 왜/이유/전망 등)일 때만 세션의 직전 종목을 재사용
         prev = _SESSION_TICKER.get(session_id)
-        is_followup = any(h in text for h in FOLLOWUP_HINTS)
-        ticker = prev if (prev and is_followup) else _clean_ticker(text)
+        is_followup = bool(
+            prev
+            and any(h in text for h in FOLLOWUP_HINTS)
+            and any(h in text for h in FOLLOWUP_DOMAIN_HINTS)
+        )
+        if is_followup:
+            ticker = prev
+            intent = "rag" if is_rag else "tool"
+        else:
+            logger.info("🔀 [Router] intent=chat (out-of-scope)")
+            return {"intent": "chat", "screen": False, "ticker": None}
 
-    intent = "rag" if is_rag else "tool"
     logger.info(f"🔀 [Router] intent={intent}, ticker={ticker}")
     return {"intent": intent, "screen": False, "ticker": ticker}
 
@@ -332,6 +371,10 @@ def _glossary_list_answer() -> str | None:
 
 async def response_node(state: StockPilotState) -> dict:
     """수집한 근거를 바탕으로 Solar가 등락률·원인 분석 응답을 생성한다."""
+    if state.get("intent") == "chat":
+        logger.info("💬 [Response] 범위 밖 질문 안내")
+        return {"messages": [AIMessage(content=OUT_OF_SCOPE_MESSAGE)]}
+
     # 스크리너 결과는 목록 템플릿으로 바로 응답
     screener = state.get("screener_results")
     if screener is not None:

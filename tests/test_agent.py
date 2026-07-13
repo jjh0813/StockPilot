@@ -1,7 +1,7 @@
 """에이전트/그래프 단위 테스트 (네트워크·API 키 불필요)."""
 from langchain_core.messages import HumanMessage
 from app.graph.edges import route_by_intent
-from app.graph.nodes import _format_change, response_node, router_node
+from app.graph.nodes import OUT_OF_SCOPE_MESSAGE, _format_change, response_node, router_node
 from app.graph.state import create_initial_state
 from app.tools.executor import _normalize_news_item
 from tests.fixtures.tool_responses import directional_news_item, stock_snapshot
@@ -32,6 +32,30 @@ async def test_router_node_tool():
     result = await router_node(state)
     assert result["intent"] == "tool"
     assert result["ticker"] == "삼성전자"
+
+
+async def test_router_node_blocks_out_of_scope_chat():
+    state = create_initial_state("s")
+    state["messages"] = [HumanMessage(content="배고프다")]
+
+    result = await router_node(state)
+
+    assert result["intent"] == "chat"
+    assert result["ticker"] is None
+
+
+async def test_response_node_returns_domain_guard_message():
+    state = create_initial_state("s")
+    state["intent"] = "chat"
+    state["messages"] = [HumanMessage(content="배고프다")]
+
+    result = await response_node(state)
+    content = result["messages"][-1].content
+
+    assert content == OUT_OF_SCOPE_MESSAGE
+    assert "주식 리서치 전용" in content
+
+
 async def test_response_node_format():
     state = create_initial_state("s")
     state["ticker"] = "삼성전자"
