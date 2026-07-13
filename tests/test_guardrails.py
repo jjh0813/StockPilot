@@ -25,6 +25,37 @@ def test_guardrail_blocks_card_and_credit_information():
     assert credit_decision.reason.startswith("sensitive_financial_input:")
 
 
+def test_guardrail_blocks_buy_sell_advice_requests():
+    blocked_questions = [
+        "삼성전자 살까?",
+        "삼성전자 매수할까?",
+        "삼성전자 매수해도 돼?",
+        "삼성전자 매도할까?",
+        "삼성전자 팔까?",
+        "테슬라 추매해도 되나?",
+        "엔비디아 손절할까?",
+        "Should I buy Samsung now?",
+    ]
+
+    for question in blocked_questions:
+        decision = check_user_input(question)
+        assert decision.allowed is False
+        assert decision.reason.startswith("investment_recommendation_request:")
+        assert decision.safe_message == NO_INVESTMENT_RECOMMENDATION_MESSAGE
+
+
+def test_guardrail_allows_educational_buy_sell_questions():
+    allowed_questions = [
+        "매수 뜻이 뭐야?",
+        "매도 공시가 뭐야?",
+        "순매수란?",
+        "삼성전자 어때?",
+    ]
+
+    for question in allowed_questions:
+        assert check_user_input(question).allowed is True
+
+
 def test_guardrail_detects_buy_sell_recommendations():
     assert contains_buy_sell_recommendation("삼성전자는 지금 무조건 매수하세요")
     assert contains_buy_sell_recommendation("This is a strong buy recommendation")

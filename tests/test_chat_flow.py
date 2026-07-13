@@ -44,6 +44,32 @@ def test_chat_stream_event_sequence(mock_tools):
     assert "tool" in types
     assert types[-1] == "done"
     assert any(t in ("token", "response") for t in types)
+
+
+def test_chat_stream_blocks_buy_sell_advice_request():
+    r = client.post(
+        "/api/v1/chat/stream",
+        json={"message": "삼성전자 매수할까?", "session_id": "guardrail-buy-1"},
+    )
+
+    assert r.status_code == 200
+    events = _parse_sse(r.text)
+    assert events[0]["type"] == "error"
+    assert "매수·매도 여부는 추천할 수 없습니다" in events[0]["error"]
+    assert all(event["type"] != "tool" for event in events)
+    assert events[-1]["type"] == "done"
+
+
+def test_chat_api_blocks_buy_sell_advice_request():
+    r = client.post(
+        "/api/v1/chat/",
+        json={"message": "삼성전자 살까?", "session_id": "guardrail-buy-2"},
+    )
+
+    assert r.status_code == 400
+    assert "매수·매도 여부는 추천할 수 없습니다" in r.json()["detail"]
+
+
 def test_chat_stream_handles_graph_failure(monkeypatch):
     async def _boom_astream(*args, **kwargs):
         raise RuntimeError("그래프 실행 강제 실패")

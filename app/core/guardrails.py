@@ -85,6 +85,22 @@ _BUY_SELL_RECOMMENDATION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     )
 )
 
+_BUY_SELL_ADVICE_REQUEST_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        # Korean casual/first-person advice requests. Keep these narrower than
+        # plain "매수/매도" so educational questions like "매수 뜻이 뭐야?" pass.
+        r"(살까|사도\s*(돼|되나|될까|괜찮|좋을까)|사야\s*(돼|되나|하나|할까)|지금\s*사도|지금\s*살까)",
+        r"(팔까|팔아도\s*(돼|되나|될까|괜찮|좋을까)|팔아야\s*(돼|되나|하나|할까)|지금\s*팔아|지금\s*팔까)",
+        r"(매수|매입|추매|진입)\s*(할까|해도\s*(돼|되나|될까|괜찮)|해야\s*(돼|되나|하나)|타이밍|시점)",
+        r"(매도|손절|익절|청산)\s*(할까|해도\s*(돼|되나|될까|괜찮)|해야\s*(돼|되나|하나)|타이밍|시점)",
+        # English equivalents for the same direct buy/sell advice request.
+        r"should\s+i\s+(buy|sell)",
+        r"(buy|sell)\s+(now|today|\?)",
+        r"is\s+it\s+(a\s+)?(buy|sell)",
+    )
+)
+
 
 @dataclass(frozen=True)
 class GuardrailDecision:
@@ -110,7 +126,7 @@ def guardrails_enabled() -> bool:
 
 
 def check_user_input(text: str) -> GuardrailDecision:
-    """Block prompt-injection and sensitive financial data before model call."""
+    """Block unsafe or regulated requests before the model/tool graph runs."""
 
     if not guardrails_enabled():
         return GuardrailDecision(allowed=True)
@@ -128,6 +144,14 @@ def check_user_input(text: str) -> GuardrailDecision:
             return GuardrailDecision(
                 allowed=False,
                 reason=f"sensitive_financial_input:{pattern.pattern}",
+            )
+
+    for pattern in _BUY_SELL_ADVICE_REQUEST_PATTERNS:
+        if pattern.search(normalized):
+            return GuardrailDecision(
+                allowed=False,
+                reason=f"investment_recommendation_request:{pattern.pattern}",
+                safe_message=NO_INVESTMENT_RECOMMENDATION_MESSAGE,
             )
 
     return GuardrailDecision(allowed=True)
