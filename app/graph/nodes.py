@@ -9,7 +9,7 @@ from app.core.llm import ainvoke_with_fallback
 from app.core.market_time import tag_session
 from app.core.prompts import RAG_GROUNDING, RAG_RESPONSE_PROMPT, RESPONSE_PROMPT, TOOL_GROUNDING
 from app.graph.state import StockPilotState
-from app.repositories.glossary import search_terms
+from app.repositories.glossary import extract_term_from_query, search_or_research_terms
 from app.repositories.rag import search_documents
 from app.tools.executor import ToolExecutor
 
@@ -29,6 +29,7 @@ RAG_HINTS = (
     "뭐야", "무슨 뜻", "뜻이", "설명", "per", "pbr",
     "유상증자", "공매도", "배당", "리스크",
     "용어", "목록", "리스트", "사업보고서", "분기보고서", "반기보고서", "정기보고서", "보고서",
+    "상장", "ipo", "공모", "청약", "상폐", "관리종목", "거래정지", "보호예수", "락업",
 )
 
 DEFINITION_HINTS = ("뭐야", "무슨 뜻", "뜻이", "설명", "용어")
@@ -45,6 +46,8 @@ INVESTMENT_DOMAIN_HINTS = (
     "per", "pbr", "eps", "bps", "roe", "roa",
     "배당", "공매도", "유상증자", "무상증자",
     "투자", "투자용어", "용어", "리스크", "호재", "악재", "코스피", "코스닥", "나스닥",
+    "상장", "ipo", "공모", "청약", "상폐", "관리종목", "거래정지", "보호예수", "락업",
+    "호가", "체결", "배당락", "권리락", "액면분할", "감자", "증자", "cb", "bw",
     "금리", "환율", "반도체", "온실가스", "esg",
 )
 
@@ -434,11 +437,17 @@ async def _direct_glossary_answer(query: str) -> str | None:
     if not query.strip():
         return None
     try:
-        matches = await search_terms(query, limit=1)
+        matches = await search_or_research_terms(query, limit=1)
     except Exception as exc:
         logger.warning(f"사전 직접 조회 실패: {type(exc).__name__}: {exc}")
         return None
     if not matches:
+        if extract_term_from_query(query):
+            return (
+                "투자 용어 사전과 외부 검색에서 확인 가능한 정의를 찾지 못했어요. "
+                "용어를 조금 더 정확히 입력해 주세요.\n\n"
+                "※ 투자 자문이 아닌 참고용 정보입니다."
+            )
         return None
     top = matches[0]
     surfaces = [top.get("term", "")] + list(top.get("aliases") or [])

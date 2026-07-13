@@ -26,6 +26,18 @@ async def test_router_node_rag():
     state["messages"] = [HumanMessage(content="PER이 뭐야?")]
     result = await router_node(state)
     assert result["intent"] == "rag"
+
+
+async def test_router_node_listing_definition_is_rag():
+    state = create_initial_state("listing-term")
+    state["messages"] = [HumanMessage(content="상장이 뭐야")]
+
+    result = await router_node(state)
+
+    assert result["intent"] == "rag"
+    assert result["ticker"] == "상장이 뭐야"
+
+
 async def test_router_node_tool():
     state = create_initial_state("s")
     state["messages"] = [HumanMessage(content="삼성전자 요즘 어때?")]
@@ -113,6 +125,37 @@ async def test_response_node_formats_disclosures_without_price_analysis():
     assert "사업보고서" in content
     assert "원인 분석" not in content
     assert "현재가" not in content
+
+
+async def test_response_node_uses_external_glossary_fallback(monkeypatch):
+    async def fake_search_or_research_terms(query: str, *, limit: int):
+        assert query == "상장이 뭐야"
+        assert limit == 1
+        return [
+            {
+                "term": "상장",
+                "definition": "기업의 주식이 증권시장에 등록되어 거래될 수 있게 되는 것입니다.",
+                "aliases": ["Listing"],
+                "example": "코스닥에 상장하면 일반 투자자가 주식을 사고팔 수 있습니다.",
+                "source_url": "https://example.com/listing",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "app.graph.nodes.search_or_research_terms",
+        fake_search_or_research_terms,
+    )
+    state = create_initial_state("listing-response")
+    state["intent"] = "rag"
+    state["messages"] = [HumanMessage(content="상장이 뭐야")]
+
+    result = await response_node(state)
+    content = result["messages"][-1].content
+
+    assert "**상장**" in content
+    assert "증권시장" in content
+    assert "원인 분석" not in content
+    assert "주식 리서치 전용 도우미" not in content
 
 
 async def test_response_node_format():

@@ -8,17 +8,40 @@ table so tools can do exact/alias lookup before falling back to document RAG.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hashlib
+import html
 import json
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+import httpx
+from loguru import logger
+
+from app.core.config import settings
 from app.repositories import get_supabase_client
 
+
+NAVER_ENCYC_URL = "https://openapi.naver.com/v1/search/encyc.json"
 
 GLOSSARY_COLUMNS = (
     "id,term,definition,category,aliases,difficulty,example,source_url,metadata,"
     "created_at,updated_at"
+)
+
+_INVESTMENT_RESEARCH_HINTS = (
+    "주식",
+    "증권",
+    "투자",
+    "상장",
+    "공모",
+    "청약",
+    "IPO",
+    "공시",
+    "재무",
+    "회계",
+    "시장",
 )
 
 
@@ -69,10 +92,225 @@ async def search_terms(query: str, *, limit: int = 5) -> list[dict[str, Any]]:
     return rank_glossary_terms(rows, query, limit=limit)
 
 
+async def search_or_research_terms(
+    query: str,
+    *,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Search glossary first; if missing, fetch an external definition and cache it.
+
+    This keeps normal glossary answers fast while letting the app learn a new
+    investment term when the structured table and vector RAG are sparse.
+    """
+    matches = await search_terms(query, limit=limit)
+    if matches:
+        return matches
+
+    researched = await research_and_cache_term(query)
+    return [researched] if researched else []
+
+
 async def get_term(term: str) -> dict[str, Any] | None:
     """Return the best glossary match for a single term-like query."""
     matches = await search_terms(term, limit=1)
     return matches[0] if matches else None
+
+
+async def research_and_cache_term(query: str) -> dict[str, Any] | None:
+    """Fetch a missing investment term from an external source and persist it."""
+    entry = await research_external_term(query)
+    if entry is None:
+        return None
+
+    saved = await upsert_glossary_entry(entry)
+    try:
+        await cache_glossary_entry_to_rag(saved)
+    except Exception as exc:  # RAG cache must not block the user's answer.
+        logger.warning(
+            f"External glossary term saved but RAG cache failed: "
+            f"term={saved.get('term')}, error={type(exc).__name__}: {exc}"
+        )
+    return saved
+
+
+async def research_external_term(
+    query: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, Any] | None:
+    """Use Naver encyclopedia search to find a concise investment-term definition."""
+    term = extract_term_from_query(query)
+    if not term:
+        return None
+    if not settings.naver_client_id or not settings.naver_client_secret:
+        return None
+
+    params = {
+        "query": f"{term} 주식 투자",
+        "display": 5,
+        "start": 1,
+    }
+    headers = {
+        "X-Naver-Client-Id": settings.naver_client_id,
+        "X-Naver-Client-Secret": settings.naver_client_secret,
+    }
+    if client is None:
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            response = await http_client.get(
+                NAVER_ENCYC_URL,
+                headers=headers,
+                params=params,
+            )
+    else:
+        response = await client.get(NAVER_ENCYC_URL, headers=headers, params=params)
+
+    if response.status_code != 200:
+        logger.warning(f"Naver encyclopedia lookup failed: HTTP {response.status_code}")
+        return None
+
+    candidates = [
+        _normalize_external_item(item, term)
+        for item in response.json().get("items", [])
+    ]
+    candidates = [item for item in candidates if item is not None]
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: item["score"], reverse=True)
+    best = candidates[0]
+    if best["score"] < 2:
+        return None
+
+    now = datetime.now(UTC).isoformat()
+    return {
+        "term": term,
+        "definition": best["definition"],
+        "category": "investment",
+        "aliases": [term],
+        "difficulty": "beginner",
+        "example": f"{term}은 투자 기사나 공시를 읽을 때 자주 나오는 개념입니다.",
+        "source_url": best["source_url"],
+        "metadata": {
+            "source_type": "external_glossary",
+            "provider": "naver_encyclopedia",
+            "external_title": best["title"],
+            "domain": best["domain"],
+            "cached_at": now,
+        },
+    }
+
+
+async def upsert_glossary_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Upsert one glossary entry and return a normalized row-like dictionary."""
+    now = datetime.now(UTC).isoformat()
+    row = _entry_to_row(entry, updated_at=now)
+    client = await get_supabase_client()
+    result = await (
+        client.table("glossary_terms")
+        .upsert([row], on_conflict="term")
+        .execute()
+    )
+    saved = _normalize_row((result.data or [row])[0])
+    saved["match_score"] = 80
+    return saved
+
+
+async def cache_glossary_entry_to_rag(entry: dict[str, Any]) -> int:
+    """Persist an externally researched term as a tiny RAG document chunk."""
+    from app.repositories import rag
+
+    term = entry.get("term") or ""
+    definition = entry.get("definition") or ""
+    source_url = entry.get("source_url")
+    content = f"용어: {term}\n뜻: {definition}"
+    if source_url:
+        content += f"\n출처: {source_url}"
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    source_hash = hashlib.sha1(term.casefold().encode("utf-8")).hexdigest()[:12]
+    return await rag.save_chunks(
+        source_id=f"glossary-external:{source_hash}",
+        chunks=[
+            {
+                "chunk_index": 0,
+                "section": term,
+                "content": content,
+                "content_hash": content_hash,
+                "metadata": {
+                    "term": term,
+                    "aliases": entry.get("aliases") or [],
+                    "source_url": source_url,
+                },
+            }
+        ],
+        base_metadata={
+            "source_type": "external_glossary",
+            "title": f"외부 검색 투자 용어: {term}",
+            "status": "active",
+        },
+    )
+
+
+def extract_term_from_query(query: str) -> str | None:
+    """Extract the likely term from questions like '상장이 뭐야?' or 'PER 뜻'."""
+    text = re.sub(r"\s+", " ", query.strip())
+    text = text.strip(" ?!.,。！？")
+    if not text:
+        return None
+
+    patterns = (
+        r"^(.+?)(?:이|가|은|는)?\s*(?:뭐야|무슨\s*뜻|뜻이야|뜻은|뜻|설명해|설명)",
+        r"^(?:주식|투자|증권)\s+(.+?)\s*(?:뭐야|무슨\s*뜻|뜻|설명)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return _clean_extracted_term(match.group(1))
+
+    if len(text) <= 30 and any(hint in text for hint in _INVESTMENT_RESEARCH_HINTS):
+        return _clean_extracted_term(text)
+    return None
+
+
+def _clean_extracted_term(value: str) -> str | None:
+    cleaned = value.strip(" ?!.,。！？\"'“”‘’")
+    cleaned = re.sub(r"^(주식|투자|증권|금융)\s+", "", cleaned)
+    cleaned = re.sub(r"(이라는|이란|란|은|는|이|가)$", "", cleaned).strip()
+    if not cleaned or len(cleaned) > 40:
+        return None
+    return cleaned
+
+
+def _normalize_external_item(
+    item: dict[str, Any],
+    term: str,
+) -> dict[str, Any] | None:
+    title = _clean_html(item.get("title") or "")
+    description = _clean_html(item.get("description") or "")
+    source_url = item.get("link") or ""
+    if not description:
+        return None
+
+    haystack = f"{title} {description}".casefold()
+    term_key = term.casefold()
+    score = 0
+    if term_key in title.casefold():
+        score += 3
+    if term_key in description.casefold():
+        score += 2
+    score += sum(1 for hint in _INVESTMENT_RESEARCH_HINTS if hint.casefold() in haystack)
+
+    return {
+        "title": title or term,
+        "definition": description,
+        "source_url": source_url,
+        "domain": urlsplit(source_url).netloc.lower(),
+        "score": score,
+    }
+
+
+def _clean_html(value: str) -> str:
+    without_tags = re.sub(r"<[^>]+>", "", value)
+    return re.sub(r"\s+", " ", html.unescape(without_tags)).strip()
 
 
 async def list_all_terms() -> list[dict[str, Any]]:

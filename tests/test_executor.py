@@ -106,7 +106,7 @@ async def test_executor_connects_glossary_repository(monkeypatch):
         assert limit == 3
         return [glossary_term_item()]
 
-    monkeypatch.setattr(glossary, "search_terms", fake_search_terms)
+    monkeypatch.setattr(glossary, "search_or_research_terms", fake_search_terms)
 
     result = await ToolExecutor().execute(
         "lookup_glossary_term",

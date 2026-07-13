@@ -448,5 +448,14 @@
     "category": "sustainability",
     "difficulty": "beginner",
     "source_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260310002820"
+  },
+  {
+    "term": "상장",
+    "aliases": ["Listing", "IPO 이후 거래소 등록"],
+    "definition": "기업의 주식이 한국거래소 같은 증권시장에 등록되어 일반 투자자가 사고팔 수 있게 되는 것을 말합니다. 상장되면 회사는 공시 의무와 시장 규칙을 지키면서 투자자로부터 자금을 조달할 수 있습니다.",
+    "example": "비상장 회사가 코스피나 코스닥에 상장하면 투자자는 증권사를 통해 그 회사 주식을 거래할 수 있습니다.",
+    "category": "market",
+    "difficulty": "beginner",
+    "source_url": "https://kind.krx.co.kr"
   }
 ]

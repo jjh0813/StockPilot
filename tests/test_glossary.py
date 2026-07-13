@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import httpx
+
 from app.repositories import glossary
 
 
@@ -24,6 +26,42 @@ def test_rank_glossary_terms_prioritizes_exact_term_and_alias():
 
     assert matches[0]["term"] == "PER"
     assert matches[0]["match_score"] >= 90
+
+
+def test_extract_term_from_definition_question():
+    assert glossary.extract_term_from_query("상장이 뭐야") == "상장"
+    assert glossary.extract_term_from_query("PER이 뭐야?") == "PER"
+    assert glossary.extract_term_from_query("보호예수 설명해") == "보호예수"
+    assert glossary.extract_term_from_query("배고프다") is None
+
+
+async def test_research_external_term_uses_naver_encyclopedia(monkeypatch):
+    monkeypatch.setattr(glossary.settings, "naver_client_id", "client-id")
+    monkeypatch.setattr(glossary.settings, "naver_client_secret", "client-secret")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["query"] == "상장 주식 투자"
+        assert request.headers["X-Naver-Client-Id"] == "client-id"
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "title": "<b>상장</b>",
+                        "description": "주식이 증권시장에 등록되어 일반 투자자가 거래할 수 있는 상태입니다.",
+                        "link": "https://example.com/listing",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        entry = await glossary.research_external_term("상장이 뭐야", client=client)
+
+    assert entry is not None
+    assert entry["term"] == "상장"
+    assert "증권시장" in entry["definition"]
+    assert entry["metadata"]["provider"] == "naver_encyclopedia"
 
 
 async def test_ingest_glossary_terms_upserts_structured_rows(tmp_path, monkeypatch):

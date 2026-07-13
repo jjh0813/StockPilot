@@ -237,7 +237,7 @@ class ToolExecutor:
     ) -> dict[str, Any]:
         """Look up investment terms from the structured glossary table."""
         logger.debug(f"[lookup_glossary_term] query={query}, limit={limit}")
-        terms = await glossary.search_terms(query, limit=limit)
+        terms = await glossary.search_or_research_terms(query, limit=limit)
         return {
             "success": True,
             "data": {
