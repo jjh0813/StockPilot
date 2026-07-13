@@ -5,114 +5,74 @@ on:
   push:
     branches: [main]
 
-env:
-  GCP_PROJECT_ID: project-1573ab59-3ab6-44db-b26
-  GCE_ZONE: us-central1-f
-  GCE_INSTANCE: stockpilot-server
-  DEPLOY_PATH: /home/${{ vars.GCE_SSH_USER }}/stockpilot
-
 jobs:
   deploy:
+    name: Deploy to GCE
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Validate required secrets
-        shell: bash
-        env:
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          GCE_SSH_USER: ${{ vars.GCE_SSH_USER }}
-        run: |
-          [[ -n "$GCP_SA_KEY" ]] || { echo "Missing secret: GCP_SA_KEY"; exit 1; }
-          [[ -n "$GCE_SSH_USER" ]] || { echo "Missing variable: GCE_SSH_USER"; exit 1; }
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v3
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          host: ${{ secrets.GCE_HOST }}
+          username: ${{ secrets.GCE_USERNAME }}
+          key: ${{ secrets.GCE_SSH_KEY }}
+          script: |
+            set -e
 
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
+            DEPLOY_DIR="/home/${{ secrets.GCE_USERNAME }}/stockpilot"
 
-      - name: Write deploy env file
-        shell: bash
-        run: |
-          cat > .env.production <<'EOF'
-          ENVIRONMENT=production
-          DEBUG=false
-          HOST=0.0.0.0
-          PORT=8000
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          JWT_EXPIRE_MINUTES=${{ secrets.JWT_EXPIRE_MINUTES }}
-          UPSTAGE_API_KEY=${{ secrets.UPSTAGE_API_KEY }}
-          LLM_MODEL=${{ secrets.LLM_MODEL }}
-          EMBEDDING_MODEL=${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_DIMENSION=${{ secrets.EMBEDDING_DIMENSION }}
-          NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}
-          DART_API_KEY=${{ secrets.DART_API_KEY }}
-          KRX_ID=${{ secrets.KRX_ID }}
-          KRX_PW=${{ secrets.KRX_PW }}
-          SUPABASE_URL=${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
-          RAG_CHUNK_SIZE=${{ secrets.RAG_CHUNK_SIZE }}
-          RAG_CHUNK_OVERLAP=${{ secrets.RAG_CHUNK_OVERLAP }}
-          RAG_EMBEDDING_BATCH_SIZE=${{ secrets.RAG_EMBEDDING_BATCH_SIZE }}
-          FRONTEND_PORT=${{ secrets.FRONTEND_PORT }}
-          BACKEND_PORT=${{ secrets.BACKEND_PORT }}
-          EOF
+            if [ ! -d "$DEPLOY_DIR/.git" ]; then
+              rm -rf "$DEPLOY_DIR"
+              git clone https://github.com/${{ github.repository }}.git "$DEPLOY_DIR"
+            fi
 
-      - name: Prepare SSH key
-        shell: bash
-        run: |
-          printf '%s' "${{ secrets.GCE_SSH_PRIVATE_KEY }}" > "${RUNNER_TEMP}/gce_key"
-          chmod 600 "${RUNNER_TEMP}/gce_key"
-          ssh-keygen -y -f "${RUNNER_TEMP}/gce_key" > "${RUNNER_TEMP}/gce_key.pub"
+            cd "$DEPLOY_DIR"
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
 
-      - name: Archive deployment bundle
-        shell: bash
-        run: |
-          tar -czf deploy.tar.gz \
-            app \
-            data \
-            deploy \
-            frontend \
-            Dockerfile \
-            docker-compose.yml \
-            pyproject.toml \
-            uv.lock \
-            README.md \
-            .env.production
+            cat > .env << 'ENV_EOF'
+            ENVIRONMENT=production
+            DEBUG=false
+            HOST=0.0.0.0
+            PORT=8000
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            JWT_EXPIRE_MINUTES=${{ secrets.JWT_EXPIRE_MINUTES }}
+            UPSTAGE_API_KEY=${{ secrets.UPSTAGE_API_KEY }}
+            LLM_MODEL=${{ secrets.LLM_MODEL }}
+            EMBEDDING_MODEL=${{ secrets.EMBEDDING_MODEL }}
+            EMBEDDING_DIMENSION=${{ secrets.EMBEDDING_DIMENSION }}
+            NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}
+            NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}
+            DART_API_KEY=${{ secrets.DART_API_KEY }}
+            KRX_ID=${{ secrets.KRX_ID }}
+            KRX_PW=${{ secrets.KRX_PW }}
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
+            RAG_CHUNK_SIZE=${{ secrets.RAG_CHUNK_SIZE }}
+            RAG_CHUNK_OVERLAP=${{ secrets.RAG_CHUNK_OVERLAP }}
+            RAG_EMBEDDING_BATCH_SIZE=${{ secrets.RAG_EMBEDDING_BATCH_SIZE }}
+            FRONTEND_PORT=${{ secrets.FRONTEND_PORT }}
+            BACKEND_PORT=${{ secrets.BACKEND_PORT }}
+            ENV_EOF
 
-      - name: Upload bundle to GCE over IAP
-        shell: bash
-        run: |
-          gcloud compute scp \
-            --quiet \
-            --project "${GCP_PROJECT_ID}" \
-            --zone "${GCE_ZONE}" \
-            --tunnel-through-iap \
-            --ssh-key-file "${RUNNER_TEMP}/gce_key" \
-            deploy.tar.gz \
-            "${{ vars.GCE_SSH_USER }}@${GCE_INSTANCE}:~/deploy.tar.gz"
+            if docker compose version >/dev/null 2>&1; then
+              DOCKER_COMPOSE="docker compose"
+            else
+              DOCKER_COMPOSE="docker-compose"
+            fi
 
-      - name: Deploy on GCE over IAP
-        shell: bash
-        run: |
-          gcloud compute ssh \
-            --quiet \
-            "${{ vars.GCE_SSH_USER }}@${GCE_INSTANCE}" \
-            --project "${GCP_PROJECT_ID}" \
-            --zone "${GCE_ZONE}" \
-            --tunnel-through-iap \
-            --ssh-key-file "${RUNNER_TEMP}/gce_key" \
-            --command "
-              mkdir -p '${DEPLOY_PATH}' &&
-              tar -xzf ~/deploy.tar.gz -C '${DEPLOY_PATH}' &&
-              mv '${DEPLOY_PATH}/.env.production' '${DEPLOY_PATH}/.env' &&
-              cd '${DEPLOY_PATH}' &&
-              docker-compose down || true &&
-              docker-compose up -d --build --remove-orphans
-            "
+            $DOCKER_COMPOSE down || true
+            $DOCKER_COMPOSE up -d --build --remove-orphans
+
+            for i in $(seq 1 12); do
+              if curl -fsS http://localhost:8000/api/v1/health/ >/dev/null; then
+                echo "Backend health check passed"
+                exit 0
+              fi
+              echo "Waiting for backend health check ($i/12)"
+              sleep 5
+            done
+
+            $DOCKER_COMPOSE logs --tail=100
+            exit 1
