@@ -149,7 +149,7 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
           >
             <option value="solar">Solar</option>
             <option value="gpt-4o-mini">GPT-4o mini</option>
-            <option value="gemini-2.0-flash">Gemini</option>
+            <option value="gemini-3.1-flash-lite">Gemini</option>
             <option value="claude-haiku">Claude</option>
           </select>
           <button

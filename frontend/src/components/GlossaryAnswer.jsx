@@ -54,7 +54,7 @@ function GlossaryAnswer({ text, terms }) {
             {part}
           </button>
           {isOpen && (
-            <span className="absolute left-1/2 top-full z-30 mt-2 w-64 -translate-x-1/2 rounded-xl border border-white/15 bg-neutral-900/95 p-3 text-left text-sm normal-case leading-relaxed text-neutral-200 shadow-xl backdrop-blur">
+            <span className="absolute left-0 top-full z-30 mt-2 w-64 max-w-[16rem] rounded-xl border border-white/15 bg-neutral-900/95 p-3 text-left text-sm normal-case leading-relaxed text-neutral-200 shadow-xl backdrop-blur">
               <span className="mb-1 block text-xs font-semibold text-emerald-300">{term.term}</span>
               <span className="block text-neutral-300">{term.definition}</span>
               {term.example && (

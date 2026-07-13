@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     llm_guardrails_enabled: bool = True
 
+    # ── 관측(Langfuse LLM 트레이싱) ──
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_host: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

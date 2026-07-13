@@ -31,10 +31,10 @@ MODEL_REGISTRY: dict[str, dict] = {
         "key": settings.openai_api_key,
         "env": "OPENAI_API_KEY",
     },
-    "gemini-2.0-flash": {
-        "label": "Gemini 2.0 Flash",
+    "gemini-3.1-flash-lite": {
+        "label": "Gemini 3.1 Flash-Lite",
         "provider": "litellm",
-        "model": "gemini/gemini-2.0-flash",
+        "model": "gemini/gemini-3.1-flash-lite",
         "key": settings.gemini_api_key,
         "env": "GEMINI_API_KEY",
     },

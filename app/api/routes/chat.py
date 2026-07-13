@@ -8,6 +8,7 @@ from loguru import logger
 
 from app.core.guardrails import GuardrailViolation, ensure_safe_user_input
 from app.graph.graph import get_stockpilot_graph
+from app.core.observability import langfuse_config
 from app.graph.state import create_initial_state
 from app.repositories.glossary import find_terms_in_text, list_all_terms
 from app.schemas.chat import ChatRequest, ChatResponse, StreamEvent
@@ -92,7 +93,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
     """단건(비스트리밍) 응답. 그래프를 끝까지 실행해 최종 답변을 반환한다."""
     graph = get_stockpilot_graph()
     try:
-        result = await graph.ainvoke(_build_state(request))
+        result = await graph.ainvoke(
+            _build_state(request),
+            config=langfuse_config(request.session_id, request.user_id),
+        )
     except GuardrailViolation as exc:
         raise HTTPException(status_code=400, detail=exc.decision.safe_message)
     except Exception:
@@ -117,6 +121,7 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
         async for mode, chunk in graph.astream(
             _build_state(request),
             stream_mode=["updates", "messages"],
+            config=langfuse_config(request.session_id, request.user_id),
         ):
             # Solar가 생성하는 토큰 조각
             if mode == "messages":

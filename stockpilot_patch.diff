@@ -1,0 +1,120 @@
+--- a/app/core/config.py
++++ b/app/core/config.py
+@@ -65,6 +65,11 @@
+     gemini_api_key: str | None = None
+     anthropic_api_key: str | None = None
+ 
++    # ── 관측(Langfuse LLM 트레이싱) ──
++    langfuse_public_key: str | None = None
++    langfuse_secret_key: str | None = None
++    langfuse_host: str | None = None
++
+ 
+ @lru_cache
+ def get_settings() -> Settings:
+--- a/app/api/routes/chat.py
++++ b/app/api/routes/chat.py
+@@ -7,6 +7,7 @@
+ from loguru import logger
+ 
+ from app.graph.graph import get_stockpilot_graph
++from app.core.observability import langfuse_config
+ from app.graph.state import create_initial_state
+ from app.repositories.glossary import find_terms_in_text, list_all_terms
+ from app.schemas.chat import ChatRequest, ChatResponse, StreamEvent
+@@ -90,7 +91,10 @@
+     """단건(비스트리밍) 응답. 그래프를 끝까지 실행해 최종 답변을 반환한다."""
+     graph = get_stockpilot_graph()
+     try:
+-        result = await graph.ainvoke(_build_state(request))
++        result = await graph.ainvoke(
++            _build_state(request),
++            config=langfuse_config(request.session_id, request.user_id),
++        )
+     except Exception:
+         logger.exception(f"채팅 처리 실패: session={request.session_id}")
+         raise HTTPException(
+@@ -113,6 +117,7 @@
+         async for mode, chunk in graph.astream(
+             _build_state(request),
+             stream_mode=["updates", "messages"],
++            config=langfuse_config(request.session_id, request.user_id),
+         ):
+             # Solar가 생성하는 토큰 조각
+             if mode == "messages":
+--- a/app/core/llm.py
++++ b/app/core/llm.py
+@@ -32,9 +32,9 @@
+         "env": "OPENAI_API_KEY",
+     },
+     "gemini-2.0-flash": {
+-        "label": "Gemini 2.0 Flash",
++        "label": "Gemini 3.1 Flash-Lite",
+         "provider": "litellm",
+-        "model": "gemini/gemini-2.0-flash",
++        "model": "gemini/gemini-3.1-flash-lite",
+         "key": settings.gemini_api_key,
+         "env": "GEMINI_API_KEY",
+     },
+--- a/app/graph/nodes.py
++++ b/app/graph/nodes.py
+@@ -21,6 +21,7 @@
+ RAG_HINTS = (
+     "뭐야", "무슨 뜻", "뜻이", "설명", "per", "pbr",
+     "유상증자", "공매도", "배당", "리스크",
++    "용어", "목록", "리스트",
+ )
+ 
+ # 급등·급락 스크리너 힌트 (특정 종목 없이 "요즘 뜨는 종목" 류)
+@@ -305,6 +306,28 @@
+     return "\n".join(lines)
+ 
+ 
++def _glossary_list_answer() -> str | None:
++    """data/glossary.json의 용어 목록을 마크다운 리스트로 반환(LLM 호출 없음)."""
++    import json
++    from pathlib import Path
++    try:
++        path = Path(__file__).resolve().parents[2] / "data" / "glossary.json"
++        entries = json.loads(path.read_text(encoding="utf-8"))
++    except Exception:
++        return None
++    if not entries:
++        return None
++    lines = ["아래는 사전에 등록된 주요 투자 용어예요:", ""]
++    for e in entries:
++        term = (e.get("term") or "").strip()
++        if not term:
++            continue
++        d = (e.get("definition") or "").strip()
++        lines.append(f"- **{term}**: {d[:50]}" + ("…" if len(d) > 50 else ""))
++    lines += ["", "각 용어가 궁금하면 \u201c(용어) 뭐야?\u201d처럼 물어보세요.", "", "※ 투자 자문이 아닌 참고용 정보입니다."]
++    return "\n".join(lines)
++
++
+ async def response_node(state: StockPilotState) -> dict:
+     """수집한 근거를 바탕으로 Solar가 등락률·원인 분석 응답을 생성한다."""
+     # 스크리너 결과는 목록 템플릿으로 바로 응답
+@@ -321,6 +344,11 @@
+ 
+     # 용어/개념 질문(rag): 사전에 있는 용어면 LLM 없이 바로 정의를 돌려준다(토큰 절약).
+     if intent == "rag":
++        if any(k in user_text for k in ("목록", "리스트", "용어들", "어떤 용어", "무슨 용어")):
++            listed = _glossary_list_answer()
++            if listed:
++                logger.info("💬 [Response] 용어 목록 응답")
++                return {"messages": [AIMessage(content=listed)], "used_model": "glossary-list"}
+         direct = await _direct_glossary_answer(user_text)
+         if direct:
+             logger.info("💬 [Response] 사전 직접 응답 생성 완료")
+--- a/frontend/src/components/GlossaryAnswer.jsx
++++ b/frontend/src/components/GlossaryAnswer.jsx
+@@ -54,7 +54,7 @@
+             {part}
+           </button>
+           {isOpen && (
+-            <span className="absolute left-1/2 top-full z-30 mt-2 w-64 -translate-x-1/2 rounded-xl border border-white/15 bg-neutral-900/95 p-3 text-left text-sm normal-case leading-relaxed text-neutral-200 shadow-xl backdrop-blur">
++            <span className="absolute left-0 top-full z-30 mt-2 w-64 max-w-[16rem] rounded-xl border border-white/15 bg-neutral-900/95 p-3 text-left text-sm normal-case leading-relaxed text-neutral-200 shadow-xl backdrop-blur">
+               <span className="mb-1 block text-xs font-semibold text-emerald-300">{term.term}</span>
+               <span className="block text-neutral-300">{term.definition}</span>
+               {term.example && (

@@ -22,6 +22,7 @@ _SESSION_TICKER: dict[str, str] = {}
 RAG_HINTS = (
     "뭐야", "무슨 뜻", "뜻이", "설명", "per", "pbr",
     "유상증자", "공매도", "배당", "리스크",
+    "용어", "목록", "리스트",
 )
 
 # 급등·급락 스크리너 힌트 (특정 종목 없이 "요즘 뜨는 종목" 류)
@@ -306,6 +307,28 @@ async def _direct_glossary_answer(query: str) -> str | None:
     return "\n".join(lines)
 
 
+def _glossary_list_answer() -> str | None:
+    """data/glossary.json의 용어 목록을 마크다운 리스트로 반환(LLM 호출 없음)."""
+    import json
+    from pathlib import Path
+    try:
+        path = Path(__file__).resolve().parents[2] / "data" / "glossary.json"
+        entries = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not entries:
+        return None
+    lines = ["아래는 사전에 등록된 주요 투자 용어예요:", ""]
+    for e in entries:
+        term = (e.get("term") or "").strip()
+        if not term:
+            continue
+        d = (e.get("definition") or "").strip()
+        lines.append(f"- **{term}**: {d[:50]}" + ("…" if len(d) > 50 else ""))
+    lines += ["", "각 용어가 궁금하면 \u201c(용어) 뭐야?\u201d처럼 물어보세요.", "", "※ 투자 자문이 아닌 참고용 정보입니다."]
+    return "\n".join(lines)
+
+
 async def response_node(state: StockPilotState) -> dict:
     """수집한 근거를 바탕으로 Solar가 등락률·원인 분석 응답을 생성한다."""
     # 스크리너 결과는 목록 템플릿으로 바로 응답
@@ -322,6 +345,11 @@ async def response_node(state: StockPilotState) -> dict:
 
     # 용어/개념 질문(rag): 사전에 있는 용어면 LLM 없이 바로 정의를 돌려준다(토큰 절약).
     if intent == "rag":
+        if any(k in user_text for k in ("목록", "리스트", "용어들", "어떤 용어", "무슨 용어")):
+            listed = _glossary_list_answer()
+            if listed:
+                logger.info("💬 [Response] 용어 목록 응답")
+                return {"messages": [AIMessage(content=listed)], "used_model": "glossary-list"}
         direct = await _direct_glossary_answer(user_text)
         if direct:
             logger.info("💬 [Response] 사전 직접 응답 생성 완료")
