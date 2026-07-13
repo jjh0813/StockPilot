@@ -64,9 +64,9 @@ def test_chat_stream_handles_graph_failure(monkeypatch):
     assert "error" in types
     assert types[-1] == "done"
 async def test_response_node_falls_back_when_llm_unavailable(monkeypatch):
-    def _raise():
+    async def _raise(*args, **kwargs):
         raise RuntimeError("Solar 사용 불가")
-    monkeypatch.setattr(nodes, "get_llm", _raise)
+    monkeypatch.setattr(nodes, "ainvoke_with_fallback", _raise)
     from app.graph.state import create_initial_state
     state = create_initial_state("s")
     state["ticker"] = "삼성전자"

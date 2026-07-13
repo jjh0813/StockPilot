@@ -1,23 +1,40 @@
-"""LLM 클라이언트 — 모델 라우팅 + 실패 시 자동 폴백.
+"""LLM client with deterministic model routing and fallback.
 
-- 기본: Upstage Solar. 추가: OpenAI/Gemini/Anthropic(LiteLLM 경유).
-- 선택한 모델로 1차 시도하고, 오류·타임아웃 시 사용 가능한 다른 모델로 자동 폴백한다.
-- API 키가 설정된 모델만 후보로 쓴다(키 없으면 조용히 건너뜀).
+- Primary project model: Upstage Solar.
+- Optional models: OpenAI/Gemini/Anthropic through LiteLLM.
+- If the selected model fails, retry Solar first and then the remaining
+  configured models before falling back to a local template response.
 """
+
+from __future__ import annotations
+
+import asyncio
 import os
+from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any
 
 from langchain_upstage import ChatUpstage
+from loguru import logger
 
 from app.core.config import settings
 
 TEMPERATURE = 0.3
 DEFAULT_MODEL = "solar"
 
-# UI에 노출되는 모델 id → 설정
-#   provider: "upstage" | "litellm"
-#   env: litellm 이 읽는 환경변수 이름
-MODEL_REGISTRY: dict[str, dict] = {
+
+@dataclass(frozen=True)
+class LLMFallbackResult:
+    """Result of an LLM call after applying explicit model fallback."""
+
+    message: Any
+    model_id: str
+    model_name: str | None
+    attempted_models: list[str]
+    fallback_used: bool
+
+
+MODEL_REGISTRY: dict[str, dict[str, Any]] = {
     "solar": {
         "label": "Solar Pro",
         "provider": "upstage",
@@ -48,8 +65,8 @@ MODEL_REGISTRY: dict[str, dict] = {
 }
 
 
-def available_models() -> list[dict]:
-    """키가 설정돼 실제 사용 가능한 모델 목록(프론트 셀렉터용)."""
+def available_models() -> list[dict[str, str]]:
+    """Return models that have keys configured."""
     return [
         {"id": mid, "label": cfg["label"]}
         for mid, cfg in MODEL_REGISTRY.items()
@@ -61,8 +78,25 @@ def _available_ids() -> list[str]:
     return [mid for mid, cfg in MODEL_REGISTRY.items() if cfg.get("key")]
 
 
+def fallback_order(model_id: str | None = None) -> list[str]:
+    """Return selected model -> Solar -> remaining configured models."""
+    avail = _available_ids()
+    if not avail:
+        raise RuntimeError(
+            "No available LLM. Configure at least one model key such as UPSTAGE_API_KEY."
+        )
+
+    order: list[str] = []
+    if model_id in avail:
+        order.append(model_id)
+    if DEFAULT_MODEL in avail and DEFAULT_MODEL not in order:
+        order.append(DEFAULT_MODEL)
+    order.extend(mid for mid in avail if mid not in order)
+    return order
+
+
 def _build_one(model_id: str):
-    """단일 모델 인스턴스 생성(스트리밍 지원)."""
+    """Build a single streaming chat model instance."""
     cfg = MODEL_REGISTRY[model_id]
     if cfg["provider"] == "upstage":
         return ChatUpstage(
@@ -71,7 +105,7 @@ def _build_one(model_id: str):
             temperature=TEMPERATURE,
             streaming=True,
         )
-    # OpenAI/Gemini/Anthropic → LiteLLM 경유(단일 인터페이스)
+
     from langchain_litellm import ChatLiteLLM
 
     if cfg.get("env") and cfg.get("key"):
@@ -79,28 +113,60 @@ def _build_one(model_id: str):
     return ChatLiteLLM(model=cfg["model"], temperature=TEMPERATURE, streaming=True)
 
 
+async def ainvoke_with_fallback(
+    messages: list[Any],
+    *,
+    model_id: str | None = None,
+    timeout_seconds: float = 45,
+) -> LLMFallbackResult:
+    """Invoke a model and explicitly retry configured fallbacks.
+
+    This is intentionally more explicit than LangChain's ``with_fallbacks`` so
+    GPT quota/payment errors do not leak to the user and the actually used model
+    is easy to report in SSE.
+    """
+    order = fallback_order(model_id)
+    errors: list[str] = []
+    last_exc: Exception | None = None
+
+    for index, current_model_id in enumerate(order):
+        try:
+            llm = _build_one(current_model_id)
+            response = await asyncio.wait_for(
+                llm.ainvoke(messages),
+                timeout=timeout_seconds,
+            )
+            meta = getattr(response, "response_metadata", None) or {}
+            return LLMFallbackResult(
+                message=response,
+                model_id=current_model_id,
+                model_name=meta.get("model_name") or meta.get("model"),
+                attempted_models=order[: index + 1],
+                fallback_used=index > 0,
+            )
+        except Exception as exc:
+            last_exc = exc
+            errors.append(f"{current_model_id}: {type(exc).__name__}")
+            if index + 1 < len(order):
+                logger.warning(
+                    "LLM attempt failed; trying fallback "
+                    f"(model={current_model_id}, error={type(exc).__name__})"
+                )
+            else:
+                logger.warning(
+                    "LLM attempt failed; no fallback left "
+                    f"(model={current_model_id}, error={type(exc).__name__})"
+                )
+
+    raise RuntimeError("All LLM fallback attempts failed: " + " | ".join(errors)) from last_exc
+
+
 @lru_cache
 def get_llm(model_id: str | None = None):
-    """선택 모델 + 폴백 체인을 반환한다.
-
-    - model_id 미지정/키 없음 → 기본(solar), 그것도 없으면 사용 가능한 첫 모델.
-    - 나머지 사용 가능한 모델을 폴백으로 연결 → 1차 실패 시 자동 대체.
-    """
-    avail = _available_ids()
-    if not avail:
-        raise RuntimeError(
-            "사용 가능한 LLM이 없습니다. UPSTAGE_API_KEY 등 최소 1개 키를 .env에 설정하세요."
-        )
-
-    if model_id in avail:
-        primary_id = model_id
-    elif DEFAULT_MODEL in avail:
-        primary_id = DEFAULT_MODEL
-    else:
-        primary_id = avail[0]
-
-    primary = _build_one(primary_id)
-    fallback_ids = [m for m in avail if m != primary_id]
+    """Backward-compatible helper returning a model with LangChain fallbacks."""
+    order = fallback_order(model_id)
+    primary = _build_one(order[0])
+    fallback_ids = order[1:]
     if not fallback_ids:
         return primary
-    return primary.with_fallbacks([_build_one(m) for m in fallback_ids])
+    return primary.with_fallbacks([_build_one(mid) for mid in fallback_ids])

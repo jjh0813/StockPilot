@@ -5,7 +5,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
 
 from app.core.guardrails import sanitize_llm_output
-from app.core.llm import get_llm
+from app.core.llm import ainvoke_with_fallback
 from app.core.market_time import tag_session
 from app.core.prompts import RAG_GROUNDING, RAG_RESPONSE_PROMPT, RESPONSE_PROMPT, TOOL_GROUNDING
 from app.graph.state import StockPilotState
@@ -371,19 +371,21 @@ async def response_node(state: StockPilotState) -> dict:
     requested_model = state.get("model")
     used_model = requested_model or "solar"
     try:
-        llm = get_llm(requested_model)
-        response = await asyncio.wait_for(
-            llm.ainvoke(
-                [
-                    SystemMessage(content=system),
-                    HumanMessage(content=user_text or "이 종목에 대해 설명해줘"),
-                ]
-            ),
-            timeout=45,
+        result = await ainvoke_with_fallback(
+            [
+                SystemMessage(content=system),
+                HumanMessage(content=user_text or "이 종목에 대해 설명해줘"),
+            ],
+            model_id=requested_model,
+            timeout_seconds=45,
         )
-        # 실제 응답을 만든 모델(폴백됐다면 폴백 모델)을 메타데이터에서 추출
-        meta = getattr(response, "response_metadata", None) or {}
-        used_model = meta.get("model_name") or meta.get("model") or used_model
+        response = result.message
+        used_model = result.model_name or result.model_id
+        if result.fallback_used:
+            logger.info(
+                f"LLM fallback applied: requested={requested_model}, "
+                f"used={result.model_id}, attempts={result.attempted_models}"
+            )
         answer = (response.content or "").strip()
         if not answer:
             answer = _fallback_answer(price, news_items, docs)
