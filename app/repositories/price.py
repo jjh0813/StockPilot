@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import math
 import threading
 import os
@@ -103,6 +105,7 @@ for _name, _ticker in _KNOWN_TICKERS.items():
 _NAME_INDEX: list[tuple[str, str]] | None = None   # (정규화된_이름, 코드), 긴 이름 우선 정렬
 _CODE_NAME: dict[str, str] = {}
 _INDEX_LOCK = threading.Lock()
+_SENSITIVE_STDIO_LOCK = threading.Lock()
 
 
 class PriceDataError(RuntimeError):
@@ -193,6 +196,7 @@ async def get_fundamentals(
     stock = _get_stock_api()
     try:
         frame = await asyncio.to_thread(
+            _call_with_suppressed_stdio,
             stock.get_market_fundamental_by_date,
             start_date.strftime("%Y%m%d"),
             end_date.strftime("%Y%m%d"),
@@ -263,6 +267,13 @@ def _get_stock_api() -> Any:
     from pykrx import stock
 
     return stock
+
+
+def _call_with_suppressed_stdio(func: Any, *args: Any, **kwargs: Any) -> Any:
+    """Call a noisy third-party function without leaking credentials to logs."""
+    with _SENSITIVE_STDIO_LOCK:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return func(*args, **kwargs)
 
 
 def _build_name_index() -> None:
