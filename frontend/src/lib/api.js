@@ -64,7 +64,13 @@ export async function streamChat(message, { sessionId = "web", model, onEvent, s
     body: JSON.stringify({ message, session_id: sessionId, model }),
     signal,
   });
-  if (!res.ok || !res.body) throw new Error(`서버 오류 (${res.status})`);
+  if (!res.ok || !res.body) {
+    const data = await res.json().catch(() => ({}));
+    const detail = Array.isArray(data.detail)
+      ? data.detail.map((d) => d.msg || JSON.stringify(d)).join(", ")
+      : data.detail;
+    throw new Error(detail || `서버 오류 (${res.status})`);
+  }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

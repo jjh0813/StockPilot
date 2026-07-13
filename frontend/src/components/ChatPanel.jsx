@@ -84,10 +84,10 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
           }
         },
       })
-    } catch {
+    } catch (err) {
       patchLastAssistant({
         status: 'error',
-        errorMsg: '서버에 연결하지 못했어요. 백엔드(uvicorn)가 켜져 있는지 확인해주세요.',
+        errorMsg: err?.message || '서버에 연결하지 못했어요. 백엔드 상태를 확인해주세요.',
       })
     } finally {
       busyRef.current = false
