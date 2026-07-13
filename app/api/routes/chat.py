@@ -23,6 +23,19 @@ _THINKING_MESSAGE = {
 }
 
 
+def _thinking_content(node_name: str, node_output: dict) -> str:
+    """Return a user-facing progress message for a completed graph node."""
+
+    if node_name == "router":
+        intent = node_output.get("intent")
+        if intent == "tool":
+            return _THINKING_MESSAGE["tool"]
+        if intent == "rag":
+            return _THINKING_MESSAGE["rag"]
+        return "답변을 준비하고 있어요..."
+    return _THINKING_MESSAGE[node_name]
+
+
 def _build_state(request: ChatRequest) -> dict:
     """요청으로부터 그래프 초기 상태를 만들고 사용자 메시지를 넣는다."""
     ensure_safe_user_input(request.message)
@@ -148,7 +161,7 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
                     yield StreamEvent(
                         type="thinking",
                         node=node_name,
-                        content=_THINKING_MESSAGE[node_name],
+                        content=_thinking_content(node_name, node_output),
                     ).to_sse()
                 if node_name == "tool":
                     tool_used = node_output.get("tool_name")
