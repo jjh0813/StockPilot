@@ -170,7 +170,8 @@ async def tool_node(state: StockPilotState) -> dict:
     # 4번째 도구: 공시(DART). 자격 증명이 없거나 실패해도 분석은 계속 진행한다.
     disclosures: list[dict] = []
     try:
-        disc = await _executor.execute("get_disclosure", {"ticker": ticker})
+        disclosure_query = (price.get("data") or {}).get("ticker") or ticker
+        disc = await _executor.execute("get_disclosure", {"ticker": disclosure_query})
         disclosures = (disc.get("data") or {}).get("disclosures", []) or []
     except Exception:
         logger.warning("공시 수집 실패 — 공시 없이 진행")

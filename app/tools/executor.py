@@ -28,7 +28,7 @@ DEFAULT_UNIVERSE = [
 TOOL_TIMEOUT_SECONDS = {
     "get_stock_price": 20,
     "get_news": 25,
-    "get_disclosure": 8,
+    "get_disclosure": 15,
     "find_positive_news_stocks": 35,
     "add_watchlist": 15,
     "lookup_glossary_term": 10,

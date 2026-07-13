@@ -86,3 +86,18 @@ async def test_list_disclosures_uses_business_report_filter():
         )
 
     assert rows[0]["rcept_no"] == "20260317001234"
+
+
+@pytest.mark.asyncio
+async def test_resolve_known_corporation_without_corp_code_download(monkeypatch):
+    async def fail_get_corporations(self):
+        raise AssertionError("known corporation should not download corpCode.xml")
+
+    monkeypatch.setattr(DartClient, "get_corporations", fail_get_corporations)
+
+    client = DartClient("test-key")
+    by_stock_code = await client.resolve_corporation("005930")
+    by_name = await client.resolve_corporation("삼성전자")
+
+    assert by_stock_code.corp_code == "00126380"
+    assert by_name.stock_code == "005930"

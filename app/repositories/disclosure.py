@@ -32,6 +32,17 @@ class Corporation:
 
 _corporation_cache: list[Corporation] | None = None
 
+_KNOWN_CORPORATIONS = [
+    Corporation("00126380", "삼성전자", "005930"),
+    Corporation("00266961", "NAVER", "035420"),
+    Corporation("00258801", "카카오", "035720"),
+]
+
+_KNOWN_CORPORATION_ALIASES: dict[str, Corporation] = {
+    "삼전": _KNOWN_CORPORATIONS[0],
+    "네이버": _KNOWN_CORPORATIONS[1],
+}
+
 
 class DartClient:
     def __init__(
@@ -71,6 +82,10 @@ class DartClient:
         return self._corporations
 
     async def resolve_corporation(self, query: str) -> Corporation:
+        known = _lookup_known_corporation(query)
+        if known:
+            return known
+
         normalized = _normalize_company_name(query)
         corporations = await self.get_corporations()
 
@@ -291,3 +306,14 @@ def _normalize_company_name(value: str) -> str:
         .replace(" ", "")
         .strip()
     )
+
+
+def _lookup_known_corporation(query: str) -> Corporation | None:
+    normalized = _normalize_company_name(query)
+    for corporation in _KNOWN_CORPORATIONS:
+        if query in {corporation.corp_code, corporation.stock_code}:
+            return corporation
+        if normalized == _normalize_company_name(corporation.corp_name):
+            return corporation
+
+    return _KNOWN_CORPORATION_ALIASES.get(normalized)

@@ -15,7 +15,7 @@ function DisclosureList({ disclosures }) {
       </div>
       {items.length === 0 ? (
         <p className="py-3 text-sm text-neutral-500">
-          최근 공시가 없어요 (DART 자격 증명 미설정 시 생략돼요).
+          최근 공시를 찾지 못했어요.
         </p>
       ) : (
         <ul className="no-scrollbar flex max-h-40 flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1">
