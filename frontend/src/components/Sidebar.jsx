@@ -19,6 +19,7 @@ function Sidebar({ conversations, activeId, onSelect, onNew, onDelete, onToggleF
   return (
     <motion.aside
       initial={false}
+      onContextMenu={(e) => e.preventDefault()}
       animate={{ x: visible ? 0 : '-120%', opacity: visible ? 1 : 0 }}
       transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
       className="fixed bottom-4 left-4 top-24 z-20 hidden w-64 flex-col rounded-2xl border border-white/15 bg-white/10 p-4 shadow-lg shadow-black/20 backdrop-blur-lg lg:flex"

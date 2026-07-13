@@ -1,0 +1,11 @@
+--- a/frontend/src/components/LineSidebar.jsx
++++ b/frontend/src/components/LineSidebar.jsx
+@@ -183,7 +183,7 @@
+               {menu && menu.index === index && (
+                 <div
+                   className="absolute z-40 min-w-[9rem] overflow-hidden rounded-lg border border-white/15 bg-neutral-900/95 shadow-xl backdrop-blur"
+-                  style={{ left: menu.x, top: menu.y }}
++                  style={{ right: 8, top: menu.y }}
+                   onClick={e => e.stopPropagation()}
+                 >
+                   <button

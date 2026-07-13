@@ -13,6 +13,7 @@
   position: relative;
   display: flex;
   justify-content: flex-start;
+  width: 100%;
 }
 
 .line-sidebar--markers {
@@ -26,11 +27,16 @@
   display: flex;
   flex-direction: column;
   gap: var(--item-gap);
+  width: 100%;
 }
 
 .line-sidebar__item {
   position: relative;
   cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
 }
 
 .line-sidebar__item::before {

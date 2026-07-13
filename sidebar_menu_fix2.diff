@@ -1,0 +1,15 @@
+--- a/frontend/src/components/LineSidebar.jsx
++++ b/frontend/src/components/LineSidebar.jsx
+@@ -120,7 +120,11 @@
+     e.preventDefault();
+     e.stopPropagation();
+     const rect = e.currentTarget.getBoundingClientRect();
+-    setMenu({ index, x: e.clientX - rect.left, y: e.clientY - rect.top });
++    // 커서 위치에 띄우되, 오른쪽 경계를 넘으면 안쪽으로 밀어 잘리지 않게 한다.
++    const MENU_W = 160;
++    const rawX = e.clientX - rect.left;
++    const x = Math.max(0, Math.min(rawX, rect.width - MENU_W));
++    setMenu({ index, x, y: e.clientY - rect.top });
+   }, []);
+ 
+   useEffect(() => {
