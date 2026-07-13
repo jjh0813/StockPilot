@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import io
 import re
+import threading
 import warnings
 import zipfile
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
+from time import monotonic
 from xml.etree import ElementTree
 
 import httpx
@@ -31,6 +34,9 @@ class Corporation:
 
 
 _corporation_cache: list[Corporation] | None = None
+_DISCLOSURE_CACHE_TTL_SECONDS = 300
+_DISCLOSURE_CACHE_LOCK = threading.Lock()
+_DISCLOSURE_CACHE: dict[tuple[str, int], tuple[float, list[dict]]] = {}
 
 _KNOWN_CORPORATIONS = [
     Corporation("00126380", "삼성전자", "005930"),
@@ -155,10 +161,18 @@ class DartClient:
 
 async def get_recent_disclosures(corp: str, limit: int = 10) -> list[dict]:
     """회사명·종목코드·DART 고유번호로 최근 공시를 조회합니다."""
+    if limit < 1:
+        raise ValueError("limit must be greater than zero")
+
+    cache_key = (_normalize_company_name(corp), limit)
+    cached = _get_cached_disclosures(cache_key)
+    if cached is not None:
+        return cached
+
     client = DartClient(settings.dart_api_key)
     corporation = await client.resolve_corporation(corp)
     rows = await client.list_disclosures(corporation.corp_code, limit=limit)
-    return [
+    result = [
         {
             "receipt_no": row["rcept_no"],
             "corp_code": row["corp_code"],
@@ -172,6 +186,29 @@ async def get_recent_disclosures(corp: str, limit: int = 10) -> list[dict]:
         }
         for row in rows
     ]
+    _set_cached_disclosures(cache_key, result)
+    return result
+
+
+def _get_cached_disclosures(cache_key: tuple[str, int]) -> list[dict] | None:
+    now = monotonic()
+    with _DISCLOSURE_CACHE_LOCK:
+        cached = _DISCLOSURE_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        created_at, disclosures = cached
+        if now - created_at > _DISCLOSURE_CACHE_TTL_SECONDS:
+            _DISCLOSURE_CACHE.pop(cache_key, None)
+            return None
+        return deepcopy(disclosures)
+
+
+def _set_cached_disclosures(
+    cache_key: tuple[str, int],
+    disclosures: list[dict],
+) -> None:
+    with _DISCLOSURE_CACHE_LOCK:
+        _DISCLOSURE_CACHE[cache_key] = (monotonic(), deepcopy(disclosures))
 
 
 async def get_business_report(corp: str) -> dict | None:

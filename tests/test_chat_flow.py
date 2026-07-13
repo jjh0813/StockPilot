@@ -4,13 +4,29 @@ import pytest
 from fastapi.testclient import TestClient
 import app.graph.nodes as nodes
 from app.main import app
-from tests.fixtures.tool_responses import directional_news_item, stock_snapshot
+from tests.fixtures.tool_responses import disclosure_item, directional_news_item, stock_snapshot
 client = TestClient(app)
 async def _fake_execute(tool_name, tool_args=None, session_id="default"):
     if tool_name == "get_stock_price":
         return {"success": True, "data": stock_snapshot()}
     if tool_name == "get_news":
         return {"success": True, "data": {"news": [directional_news_item()]}}
+    if tool_name == "get_disclosure":
+        item = disclosure_item()
+        return {
+            "success": True,
+            "data": {
+                "ticker": tool_args.get("ticker") if tool_args else "005930",
+                "disclosures": [
+                    {
+                        **item,
+                        "title": item["report_name"],
+                        "date": item["received_date"],
+                        "url": item["source_url"],
+                    }
+                ],
+            },
+        }
     return {"success": False, "error": f"알 수 없는 도구: {tool_name}"}
 def _parse_sse(text):
     return [
@@ -58,6 +74,48 @@ def test_chat_stream_blocks_out_of_scope_without_tool():
     assert "tool" not in types
     response = next(event for event in events if event["type"] == "response")
     assert "주식 리서치 전용" in response["content"]
+    assert events[-1]["type"] == "done"
+
+
+def test_chat_stream_disclosure_request_uses_disclosure_only(monkeypatch):
+    calls = []
+
+    async def fake_execute(tool_name, tool_args=None, session_id="default"):
+        calls.append(tool_name)
+        if tool_name == "get_disclosure":
+            item = disclosure_item()
+            return {
+                "success": True,
+                "data": {
+                    "ticker": "005930",
+                    "disclosures": [
+                        {
+                            **item,
+                            "title": item["report_name"],
+                            "date": item["received_date"],
+                            "url": item["source_url"],
+                        }
+                    ],
+                },
+            }
+        return {"success": False, "error": f"unexpected tool: {tool_name}"}
+
+    monkeypatch.setattr(nodes._executor, "execute", fake_execute)
+
+    r = client.post(
+        "/api/v1/chat/stream",
+        json={"message": "삼성전자 공시 알려줘", "session_id": "disclosure-1"},
+    )
+
+    assert r.status_code == 200
+    events = _parse_sse(r.text)
+    assert calls == ["get_disclosure"]
+    tool_event = next(event for event in events if event["type"] == "tool")
+    assert tool_event["tool_result"]["price"] is None
+    assert tool_event["tool_result"]["disclosures"][0]["title"] == "사업보고서 (2025.12)"
+    response = next(event for event in events if event["type"] == "response")
+    assert "삼성전자 최근 공시" in response["content"]
+    assert "원인 분석" not in response["content"]
     assert events[-1]["type"] == "done"
 
 

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import html
 import re
+import threading
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from time import monotonic
 from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
@@ -15,6 +18,9 @@ from loguru import logger
 from app.core.config import settings
 
 NAVER_NEWS_URL = "https://openapi.naver.com/v1/search/news.json"
+_NEWS_CACHE_TTL_SECONDS = 300
+_NEWS_CACHE_LOCK = threading.Lock()
+_NEWS_CACHE: dict[tuple[str, int, str], tuple[float, list[dict[str, Any]]]] = {}
 
 _FINANCIAL_KEYWORDS = (
     "주가",
@@ -152,6 +158,14 @@ async def search_news(
         "X-Naver-Client-Secret": settings.naver_client_secret,
     }
     params = {"query": query.strip(), "display": display, "start": 1, "sort": sort}
+    cache_key = (query.strip(), display, sort)
+    use_cache = client is None
+    if use_cache:
+        cached = _get_cached_news(cache_key)
+        if cached is not None:
+            logger.debug(f"Naver news cache hit: query={query!r}, display={display}")
+            return cached
+
     if client is None:
         async with httpx.AsyncClient(timeout=15.0) as http_client:
             response = await http_client.get(
@@ -179,7 +193,32 @@ async def search_news(
         f"네이버 뉴스 수집: query={query!r}, "
         f"received={len(normalized)}, unique={len(deduplicated)}"
     )
+    if use_cache:
+        _set_cached_news(cache_key, deduplicated)
     return deduplicated
+
+
+def _get_cached_news(
+    cache_key: tuple[str, int, str],
+) -> list[dict[str, Any]] | None:
+    now = monotonic()
+    with _NEWS_CACHE_LOCK:
+        cached = _NEWS_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        created_at, items = cached
+        if now - created_at > _NEWS_CACHE_TTL_SECONDS:
+            _NEWS_CACHE.pop(cache_key, None)
+            return None
+        return deepcopy(items)
+
+
+def _set_cached_news(
+    cache_key: tuple[str, int, str],
+    items: list[dict[str, Any]],
+) -> None:
+    with _NEWS_CACHE_LOCK:
+        _NEWS_CACHE[cache_key] = (monotonic(), deepcopy(items))
 
 
 def rule_filter(

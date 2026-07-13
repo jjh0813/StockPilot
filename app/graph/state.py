@@ -10,6 +10,7 @@ from langgraph.graph.message import add_messages
 
 # 라우터가 분류하는 의도
 Intent = Literal["chat", "rag", "tool"]
+ToolMode = Literal["market", "disclosure"]
 
 
 class StockPilotState(TypedDict, total=False):
@@ -22,6 +23,7 @@ class StockPilotState(TypedDict, total=False):
     tool_name: Optional[str]
     tool_args: Optional[dict[str, Any]]
     tool_result: Optional[Any]
+    tool_mode: Optional[ToolMode]       # market=시세·뉴스, disclosure=공시 전용
     price_data: Optional[Any]
     news_items: list[dict[str, Any]]
     disclosures: list[dict[str, Any]]   # 최근 공시 목록 (4번째 도구)
@@ -47,6 +49,7 @@ def create_initial_state(
         "tool_name": None,
         "tool_args": None,
         "tool_result": None,
+        "tool_mode": None,
         "price_data": None,
         "news_items": [],
         "disclosures": [],

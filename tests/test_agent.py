@@ -34,6 +34,42 @@ async def test_router_node_tool():
     assert result["ticker"] == "삼성전자"
 
 
+async def test_router_node_disclosure_tool_mode():
+    state = create_initial_state("disclosure-router")
+    state["messages"] = [HumanMessage(content="삼성전자 공시 알려줘")]
+
+    result = await router_node(state)
+
+    assert result["intent"] == "tool"
+    assert result["ticker"] == "삼성전자"
+    assert result["tool_mode"] == "disclosure"
+
+
+async def test_router_node_followup_disclosure_uses_previous_ticker():
+    state = create_initial_state("disclosure-followup")
+    state["messages"] = [HumanMessage(content="삼성전자 어때?")]
+    await router_node(state)
+
+    state = create_initial_state("disclosure-followup")
+    state["messages"] = [HumanMessage(content="공시 알려줘")]
+    result = await router_node(state)
+
+    assert result["intent"] == "tool"
+    assert result["ticker"] == "삼성전자"
+    assert result["tool_mode"] == "disclosure"
+
+
+async def test_router_node_business_report_risk_uses_rag_not_disclosure():
+    state = create_initial_state("report-risk")
+    state["messages"] = [HumanMessage(content="삼성전자 사업보고서에서 리스크 요인 알려줘")]
+
+    result = await router_node(state)
+
+    assert result["intent"] == "rag"
+    assert result["ticker"] == "삼성전자"
+    assert result["tool_mode"] is None
+
+
 async def test_router_node_blocks_out_of_scope_chat():
     state = create_initial_state("s")
     state["messages"] = [HumanMessage(content="배고프다")]
@@ -54,6 +90,29 @@ async def test_response_node_returns_domain_guard_message():
 
     assert content == OUT_OF_SCOPE_MESSAGE
     assert "주식 리서치 전용" in content
+
+
+async def test_response_node_formats_disclosures_without_price_analysis():
+    state = create_initial_state("s")
+    state["intent"] = "tool"
+    state["tool_mode"] = "disclosure"
+    state["ticker"] = "삼성전자"
+    state["disclosures"] = [
+        {
+            "corp_name": "삼성전자",
+            "report_name": "사업보고서 (2025.12)",
+            "received_date": "20260317",
+            "source_url": "https://dart.fss.or.kr/example",
+        }
+    ]
+
+    result = await response_node(state)
+    content = result["messages"][-1].content
+
+    assert "삼성전자 최근 공시" in content
+    assert "사업보고서" in content
+    assert "원인 분석" not in content
+    assert "현재가" not in content
 
 
 async def test_response_node_format():

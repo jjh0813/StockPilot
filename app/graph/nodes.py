@@ -28,7 +28,13 @@ OUT_OF_SCOPE_MESSAGE = (
 RAG_HINTS = (
     "뭐야", "무슨 뜻", "뜻이", "설명", "per", "pbr",
     "유상증자", "공매도", "배당", "리스크",
-    "용어", "목록", "리스트",
+    "용어", "목록", "리스트", "사업보고서", "분기보고서", "반기보고서", "정기보고서", "보고서",
+)
+
+DEFINITION_HINTS = ("뭐야", "무슨 뜻", "뜻이", "설명", "용어")
+
+DISCLOSURE_HINTS = (
+    "공시", "dart",
 )
 
 INVESTMENT_DOMAIN_HINTS = (
@@ -51,6 +57,7 @@ SCREENER_HINTS = (
 # 후속 질문 힌트 (종목명 없이 직전 종목을 이어 묻는 경우)
 FOLLOWUP_HINTS = (
     "왜", "그럼", "그래서", "이유", "더", "자세", "어떻게", "그건", "방금", "전망",
+    "공시", "보고서",
 )
 
 FOLLOWUP_DOMAIN_HINTS = (
@@ -132,14 +139,22 @@ async def router_node(state: StockPilotState) -> dict:
         return {"intent": "tool", "screen": True, "ticker": None}
 
     is_rag = any(hint in lower for hint in RAG_HINTS)
+    wants_definition = any(hint in lower for hint in DEFINITION_HINTS)
+    wants_disclosure = any(hint in lower for hint in DISCLOSURE_HINTS)
     is_domain_query = _has_investment_domain(text)
     if matched_stock:
         _SESSION_TICKER[session_id] = matched_stock  # 문맥 저장
         ticker = matched_stock
-        intent = "rag" if is_rag else "tool"
+        if wants_disclosure and not wants_definition:
+            intent = "tool"
+            tool_mode = "disclosure"
+        else:
+            intent = "rag" if is_rag else "tool"
+            tool_mode = "market" if intent == "tool" else None
     elif is_rag and is_domain_query:
         ticker = _clean_ticker(text)
         intent = "rag"
+        tool_mode = None
     else:
         # 후속 질문(짧거나 왜/이유/전망 등)일 때만 세션의 직전 종목을 재사용
         prev = _SESSION_TICKER.get(session_id)
@@ -150,13 +165,18 @@ async def router_node(state: StockPilotState) -> dict:
         )
         if is_followup:
             ticker = prev
-            intent = "rag" if is_rag else "tool"
+            if wants_disclosure and not wants_definition:
+                intent = "tool"
+                tool_mode = "disclosure"
+            else:
+                intent = "rag" if is_rag else "tool"
+                tool_mode = "market" if intent == "tool" else None
         else:
             logger.info("🔀 [Router] intent=chat (out-of-scope)")
             return {"intent": "chat", "screen": False, "ticker": None}
 
-    logger.info(f"🔀 [Router] intent={intent}, ticker={ticker}")
-    return {"intent": intent, "screen": False, "ticker": ticker}
+    logger.info(f"🔀 [Router] intent={intent}, ticker={ticker}, tool_mode={tool_mode}")
+    return {"intent": intent, "screen": False, "ticker": ticker, "tool_mode": tool_mode}
 
 
 async def rag_node(state: StockPilotState) -> dict:
@@ -186,6 +206,23 @@ async def tool_node(state: StockPilotState) -> dict:
         }
 
     ticker = state.get("ticker") or ""
+    if state.get("tool_mode") == "disclosure":
+        disclosures: list[dict] = []
+        if ticker:
+            try:
+                disc = await _executor.execute("get_disclosure", {"ticker": ticker})
+                disclosures = (disc.get("data") or {}).get("disclosures", []) or []
+            except Exception:
+                logger.warning("공시 수집 실패 — 공시 없이 진행")
+        logger.info(f"🔧 [Tool] 공시 전용 수집 완료 | 공시 {len(disclosures)}건")
+        return {
+            "ticker": ticker,
+            "disclosures": disclosures,
+            "tool_result": {"disclosures": disclosures},
+            "tool_name": "get_disclosure",
+            "tool_mode": "disclosure",
+        }
+
     price = await _executor.execute("get_stock_price", {"ticker": ticker})
     user_text = _last_user_text(state)
     change_pct = (price.get("data") or {}).get("change_pct")
@@ -228,6 +265,7 @@ async def tool_node(state: StockPilotState) -> dict:
             "disclosures": disclosures,
         },
         "tool_name": "get_stock_price,get_news,get_disclosure",
+        "tool_mode": "market",
     }
 
 
@@ -279,6 +317,39 @@ def _format_screener(stocks: list[dict]) -> str:
         lines.append(f"• {name} — {top}")
     lines.append("")
     lines.append("※ 상승 근거 뉴스 기준이며, 투자 자문이 아닌 참고용 정보입니다.")
+    return "\n".join(lines)
+
+
+def _format_disclosure_answer(ticker: str | None, disclosures: list[dict]) -> str:
+    """최근 공시 목록을 주가 분석 없이 그대로 보여준다."""
+    name = ticker or "해당 종목"
+    if not ticker:
+        return (
+            "어느 회사의 공시를 볼지 종목명이나 회사명을 함께 알려주세요.\n"
+            "예: “삼성전자 공시 알려줘”\n\n"
+            "※ 투자 자문이 아닌 참고 정보입니다."
+        )
+    if not disclosures:
+        return (
+            f"{name}의 최근 공시를 찾지 못했어요.\n"
+            "DART 자격 증명이나 조회 가능한 최근 공시 여부를 확인해 주세요.\n\n"
+            "※ 투자 자문이 아닌 참고 정보입니다."
+        )
+
+    lines = [f"### {name} 최근 공시", ""]
+    for item in disclosures[:8]:
+        title = item.get("report_name") or item.get("title") or "공시"
+        date = item.get("received_date") or item.get("date") or ""
+        url = item.get("source_url") or item.get("url") or ""
+        corp = item.get("corp_name") or name
+        meta = " · ".join(part for part in (corp, date) if part)
+        line = f"- **{title}**"
+        if meta:
+            line += f" ({meta})"
+        if url:
+            line += f"  \n  {url}"
+        lines.append(line)
+    lines += ["", "※ 투자 자문이 아닌 참고 정보입니다."]
     return "\n".join(lines)
 
 
@@ -380,6 +451,19 @@ async def response_node(state: StockPilotState) -> dict:
     if screener is not None:
         logger.info("💬 [Response] 스크리너 응답 생성 완료")
         return {"messages": [AIMessage(content=_format_screener(screener))]}
+
+    if state.get("tool_mode") == "disclosure":
+        logger.info("💬 [Response] 공시 전용 응답 생성 완료")
+        return {
+            "messages": [
+                AIMessage(
+                    content=_format_disclosure_answer(
+                        state.get("ticker"),
+                        state.get("disclosures") or [],
+                    )
+                )
+            ],
+        }
 
     price = state.get("price_data") or {}
     news_items = state.get("news_items") or []

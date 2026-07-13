@@ -4,6 +4,7 @@ import zipfile
 import httpx
 import pytest
 
+from app.repositories import disclosure as disclosure_repo
 from app.repositories.disclosure import (
     DART_API_BASE,
     DartClient,
@@ -101,3 +102,53 @@ async def test_resolve_known_corporation_without_corp_code_download(monkeypatch)
 
     assert by_stock_code.corp_code == "00126380"
     assert by_name.stock_code == "005930"
+
+
+@pytest.mark.asyncio
+async def test_get_recent_disclosures_reuses_short_cache(monkeypatch):
+    monkeypatch.setattr(disclosure_repo.settings, "dart_api_key", "test-key")
+    with disclosure_repo._DISCLOSURE_CACHE_LOCK:
+        disclosure_repo._DISCLOSURE_CACHE.clear()
+
+    calls = 0
+
+    async def fake_resolve_corporation(self, corp):
+        return disclosure_repo.Corporation("00126380", "Samsung Electronics", "005930")
+
+    async def fake_list_disclosures(self, corp_code, *, limit):
+        nonlocal calls
+        calls += 1
+        return [
+            {
+                "rcept_no": "20260317001234",
+                "corp_code": corp_code,
+                "corp_name": "Samsung Electronics",
+                "stock_code": "005930",
+                "report_nm": f"Business report {calls}",
+                "rcept_dt": "20260317",
+            }
+        ][:limit]
+
+    monkeypatch.setattr(
+        disclosure_repo.DartClient,
+        "resolve_corporation",
+        fake_resolve_corporation,
+    )
+    monkeypatch.setattr(
+        disclosure_repo.DartClient,
+        "list_disclosures",
+        fake_list_disclosures,
+    )
+
+    first = await disclosure_repo.get_recent_disclosures("005930", limit=3)
+    second = await disclosure_repo.get_recent_disclosures("005930", limit=3)
+
+    assert calls == 1
+    assert second == first
+
+    second[0]["report_name"] = "mutated"
+    third = await disclosure_repo.get_recent_disclosures("005930", limit=3)
+    assert third[0]["report_name"] == first[0]["report_name"]
+
+    with disclosure_repo._DISCLOSURE_CACHE_LOCK:
+        disclosure_repo._DISCLOSURE_CACHE.clear()

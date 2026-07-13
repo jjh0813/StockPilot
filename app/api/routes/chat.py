@@ -20,6 +20,7 @@ _THINKING_MESSAGE = {
     "router": "질문 의도를 파악하고 있어요...",
     "rag": "관련 문서를 찾고 있어요...",
     "tool": "시세·뉴스를 수집하고 있어요...",
+    "disclosure": "최근 공시를 조회하고 있어요...",
 }
 
 
@@ -29,10 +30,14 @@ def _thinking_content(node_name: str, node_output: dict) -> str:
     if node_name == "router":
         intent = node_output.get("intent")
         if intent == "tool":
+            if node_output.get("tool_mode") == "disclosure":
+                return _THINKING_MESSAGE["disclosure"]
             return _THINKING_MESSAGE["tool"]
         if intent == "rag":
             return _THINKING_MESSAGE["rag"]
         return "답변을 준비하고 있어요..."
+    if node_name == "tool" and node_output.get("tool_mode") == "disclosure":
+        return _THINKING_MESSAGE["disclosure"]
     return _THINKING_MESSAGE[node_name]
 
 

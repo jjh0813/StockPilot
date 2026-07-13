@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
+from app.repositories import news as news_repo
 from app.repositories.news import (
     get_company_news,
     get_stock_issue_news,
@@ -53,6 +54,60 @@ async def test_search_news_normalizes_html_and_deduplicates(monkeypatch):
     assert len(items) == 1
     assert items[0]["title"] == "삼성전자 실적 발표"
     assert items[0]["published_at"].tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_search_news_reuses_short_cache(monkeypatch):
+    monkeypatch.setattr("app.repositories.news.settings.naver_client_id", "client-id")
+    monkeypatch.setattr(
+        "app.repositories.news.settings.naver_client_secret",
+        "client-secret",
+    )
+    with news_repo._NEWS_CACHE_LOCK:
+        news_repo._NEWS_CACHE.clear()
+
+    calls = 0
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        _news_item(
+                            title=f"Samsung earnings {calls}",
+                            description="Profit improved",
+                            url="https://example.com/cache",
+                        )
+                    ]
+                },
+            )
+
+    monkeypatch.setattr(news_repo.httpx, "AsyncClient", FakeAsyncClient)
+
+    first = await search_news("Samsung")
+    second = await search_news("Samsung")
+
+    assert calls == 1
+    assert second == first
+
+    second[0]["title"] = "mutated"
+    third = await search_news("Samsung")
+    assert third[0]["title"] == first[0]["title"]
+
+    with news_repo._NEWS_CACHE_LOCK:
+        news_repo._NEWS_CACHE.clear()
 
 
 def test_rule_filter_scores_company_and_financial_keywords():
