@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from loguru import logger
 
+from app.core.guardrails import GuardrailViolation, ensure_safe_user_input
 from app.graph.graph import get_stockpilot_graph
 from app.graph.state import create_initial_state
 from app.repositories.glossary import find_terms_in_text, list_all_terms
@@ -23,6 +24,7 @@ _THINKING_MESSAGE = {
 
 def _build_state(request: ChatRequest) -> dict:
     """요청으로부터 그래프 초기 상태를 만들고 사용자 메시지를 넣는다."""
+    ensure_safe_user_input(request.message)
     state = create_initial_state(request.session_id, request.user_id, model=request.model)
     state["messages"] = [HumanMessage(content=request.message)]
     return state
@@ -91,6 +93,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
     graph = get_stockpilot_graph()
     try:
         result = await graph.ainvoke(_build_state(request))
+    except GuardrailViolation as exc:
+        raise HTTPException(status_code=400, detail=exc.decision.safe_message)
     except Exception:
         logger.exception(f"채팅 처리 실패: session={request.session_id}")
         raise HTTPException(
@@ -173,6 +177,10 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
         if terms:
             yield StreamEvent(type="glossary", node="response", terms=terms).to_sse()
 
+        yield StreamEvent(type="done").to_sse()
+    except GuardrailViolation as exc:
+        logger.warning(f"Guardrail blocked request: session={request.session_id}")
+        yield StreamEvent(type="error", error=exc.decision.safe_message).to_sse()
         yield StreamEvent(type="done").to_sse()
     except Exception:
         logger.exception(f"스트리밍 처리 실패: session={request.session_id}")

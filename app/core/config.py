@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
     anthropic_api_key: str | None = None
+    llm_guardrails_enabled: bool = True
 
 
 @lru_cache

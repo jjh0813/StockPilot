@@ -4,6 +4,7 @@ import asyncio
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
 
+from app.core.guardrails import sanitize_llm_output
 from app.core.llm import get_llm
 from app.core.market_time import tag_session
 from app.core.prompts import RAG_GROUNDING, RAG_RESPONSE_PROMPT, RESPONSE_PROMPT, TOOL_GROUNDING
@@ -362,6 +363,8 @@ async def response_node(state: StockPilotState) -> dict:
         logger.warning(f"LLM 응답 실패, 템플릿으로 폴백: {type(exc).__name__}: {exc}")
         answer = _fallback_answer(price, news_items, docs)
         used_model = "template-fallback"
+
+    answer = sanitize_llm_output(answer)
 
     logger.info(f"💬 [Response] 응답 생성 완료 (model={used_model})")
     return {"messages": [AIMessage(content=answer)], "used_model": used_model}

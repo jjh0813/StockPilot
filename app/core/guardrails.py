@@ -1,0 +1,177 @@
+"""Guardrails applied around the shared LiteLLM/LangChain model path."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from app.core.config import settings
+
+
+SAFE_BLOCKED_MESSAGE = (
+    "요청에 보안 우회, 비밀키 추출, 카드·신용정보 같은 민감 정보가 포함되어 "
+    "처리하지 않았습니다. 종목·뉴스·공시·재무 정보 질문으로 다시 입력해 주세요."
+)
+
+NO_INVESTMENT_RECOMMENDATION_MESSAGE = (
+    "특정 종목의 매수·매도 여부는 추천할 수 없습니다. 대신 가격 흐름, 뉴스, 공시, "
+    "재무지표 등 판단에 필요한 근거를 중립적으로 정리해 드릴 수 있습니다."
+)
+
+INVESTMENT_DISCLAIMER = "※ 투자 자문이 아닌 참고 정보입니다."
+
+_PROMPT_INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"ignore\s+(all\s+)?(previous|prior)\s+(instructions|prompts)",
+        r"reveal\s+(the\s+)?(system|developer)\s+(prompt|message)",
+        r"(system|developer)\s+prompt",
+        r"jailbreak",
+        r"bypass\s+(safety|guardrail|policy)",
+        r"print\s+(your\s+)?(api|secret|env|environment)\s*(key|variables?)",
+        r"(api|secret|private)\s*key",
+        r"환경\s*변수",
+        r"시스템\s*프롬프트",
+        r"개발자\s*메시지",
+        r"프롬프트\s*(무시|공개|출력)",
+        r"보안\s*(우회|해제)",
+        r"탈옥",
+    )
+)
+
+_SENSITIVE_FINANCIAL_INPUT_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        # Credit/debit card number-like strings.
+        r"\b(?:\d[ -]*?){13,19}\b",
+        r"(?:cvc|cvv|카드\s*보안\s*코드|보안\s*코드)",
+        r"\b(?:credit\s*card|debit\s*card|card\s*number)\b",
+        r"(?:카드\s*번호|신용\s*카드|체크\s*카드)",
+        r"(?:주민등록번호|주민\s*번호|resident\s*registration\s*number)",
+        r"\b\d{6}-\d{7}\b",
+        r"(?:신용\s*점수|신용\s*등급|credit\s*score)",
+        r"(?:계좌\s*번호|bank\s*account)",
+    )
+)
+
+_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"sk-[A-Za-z0-9_\-]{20,}"), "[REDACTED_API_KEY]"),
+    (re.compile(r"up_[A-Za-z0-9_\-]{20,}"), "[REDACTED_API_KEY]"),
+    (
+        re.compile(
+            r"-----BEGIN (?:RSA |EC |OPENSSH |)PRIVATE KEY-----.*?-----END "
+            r"(?:RSA |EC |OPENSSH |)PRIVATE KEY-----",
+            re.DOTALL,
+        ),
+        "[REDACTED_PRIVATE_KEY]",
+    ),
+    (
+        re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
+        "[REDACTED_EMAIL]",
+    ),
+    (re.compile(r"\b01[016789]-?\d{3,4}-?\d{4}\b"), "[REDACTED_PHONE]"),
+)
+
+_BUY_SELL_RECOMMENDATION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"(매수|매도)\s*(추천|권장|하세요|하라|해야\s*합니다|하는\s*게\s*좋)",
+        r"(사세요|팔세요|사는\s*게\s*좋|파는\s*게\s*좋)",
+        r"(buy|sell)\s+(recommend|rating|signal|now)",
+        r"(strong\s*)?(buy|sell)\s*recommendation",
+        r"무조건\s*(매수|매도)",
+        r"반드시\s*(매수|매도)",
+        r"지금\s*(사야|팔아야)",
+    )
+)
+
+
+@dataclass(frozen=True)
+class GuardrailDecision:
+    """Result of a guardrail check."""
+
+    allowed: bool
+    reason: str | None = None
+    safe_message: str = SAFE_BLOCKED_MESSAGE
+
+
+class GuardrailViolation(ValueError):
+    """Raised when an input should not be sent to an LLM."""
+
+    def __init__(self, decision: GuardrailDecision):
+        self.decision = decision
+        super().__init__(decision.reason or decision.safe_message)
+
+
+def guardrails_enabled() -> bool:
+    """Return whether runtime guardrails are enabled."""
+
+    return settings.llm_guardrails_enabled
+
+
+def check_user_input(text: str) -> GuardrailDecision:
+    """Block prompt-injection and sensitive financial data before model call."""
+
+    if not guardrails_enabled():
+        return GuardrailDecision(allowed=True)
+
+    normalized = text.strip()
+    for pattern in _PROMPT_INJECTION_PATTERNS:
+        if pattern.search(normalized):
+            return GuardrailDecision(
+                allowed=False,
+                reason=f"prompt_injection:{pattern.pattern}",
+            )
+
+    for pattern in _SENSITIVE_FINANCIAL_INPUT_PATTERNS:
+        if pattern.search(normalized):
+            return GuardrailDecision(
+                allowed=False,
+                reason=f"sensitive_financial_input:{pattern.pattern}",
+            )
+
+    return GuardrailDecision(allowed=True)
+
+
+def ensure_safe_user_input(text: str) -> None:
+    """Raise a GuardrailViolation when user input should be blocked."""
+
+    decision = check_user_input(text)
+    if not decision.allowed:
+        raise GuardrailViolation(decision)
+
+
+def mask_sensitive_text(text: str) -> str:
+    """Redact obvious secrets/PII from model output."""
+
+    if not text:
+        return text
+    masked = text
+    for pattern, replacement in _SECRET_PATTERNS:
+        masked = pattern.sub(replacement, masked)
+    return masked
+
+
+def contains_buy_sell_recommendation(text: str) -> bool:
+    """Detect direct buy/sell recommendation wording."""
+
+    return any(pattern.search(text or "") for pattern in _BUY_SELL_RECOMMENDATION_PATTERNS)
+
+
+def sanitize_llm_output(text: str) -> str:
+    """Apply post-call guardrails to an LLM answer.
+
+    StockPilot can explain evidence, risks, and context, but must never recommend
+    whether the user should buy or sell a specific stock.
+    """
+
+    if not guardrails_enabled():
+        return text
+
+    safe = mask_sensitive_text(text.strip())
+    if contains_buy_sell_recommendation(safe):
+        safe = NO_INVESTMENT_RECOMMENDATION_MESSAGE
+
+    if safe and INVESTMENT_DISCLAIMER not in safe:
+        safe = f"{safe}\n\n{INVESTMENT_DISCLAIMER}"
+    return safe
