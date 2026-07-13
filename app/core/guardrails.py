@@ -18,6 +18,11 @@ NO_INVESTMENT_RECOMMENDATION_MESSAGE = (
     "재무지표 등 판단에 필요한 근거를 중립적으로 정리해 드릴 수 있습니다."
 )
 
+NO_PRICE_PREDICTION_MESSAGE = (
+    "목표가·향후 주가 예측은 제공할 수 없습니다. 대신 현재 확인 가능한 시세, 뉴스, "
+    "공시, 재무지표와 주요 리스크를 근거 중심으로 정리해 드릴 수 있습니다."
+)
+
 INVESTMENT_DISCLAIMER = "※ 투자 자문이 아닌 참고 정보입니다."
 
 _PROMPT_INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
@@ -101,6 +106,30 @@ _BUY_SELL_ADVICE_REQUEST_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     )
 )
 
+_PRICE_PREDICTION_REQUEST_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        # Direct target-price requests. Educational questions like
+        # "목표주가 뜻이 뭐야?" do not match these patterns.
+        r"(목표\s*가|목표\s*주가)\s*(얼마|몇\s*원|알려|제시|잡아|예상|예측|산출|계산)",
+        r"(적정\s*주가|적정\s*가치)\s*(얼마|몇\s*원|알려|제시|예상|예측|산출|계산)",
+        r"(얼마까지|어디까지|몇\s*원까지)\s*(오를|올라|갈|내릴|떨어질)",
+        # Direct future direction predictions.
+        r"(내일|다음\s*주|이번\s*주|다음\s*달|이번\s*달|향후|앞으로)\s*.*(오를까|오르나|상승할까|떨어질까|내릴까|하락할까|갈까)",
+        r"(주가|가격)\s*.*(예측|예상해|전망해|맞춰|맞혀)",
+        r"(오를지|내릴지|떨어질지)\s*(맞춰|예측|예상)",
+    )
+)
+
+_PRICE_PREDICTION_OUTPUT_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"(목표\s*가|목표\s*주가|적정\s*주가)\s*(?:는|은|:)?\s*[\d,]+\s*원",
+        r"(내일|다음\s*주|이번\s*주|향후|앞으로)\s*.*(오를|상승할|내릴|하락할)\s*(것|가능성)",
+        r"주가\s*(예측|전망)\s*[:：]",
+    )
+)
+
 
 @dataclass(frozen=True)
 class GuardrailDecision:
@@ -154,6 +183,14 @@ def check_user_input(text: str) -> GuardrailDecision:
                 safe_message=NO_INVESTMENT_RECOMMENDATION_MESSAGE,
             )
 
+    for pattern in _PRICE_PREDICTION_REQUEST_PATTERNS:
+        if pattern.search(normalized):
+            return GuardrailDecision(
+                allowed=False,
+                reason=f"price_prediction_request:{pattern.pattern}",
+                safe_message=NO_PRICE_PREDICTION_MESSAGE,
+            )
+
     return GuardrailDecision(allowed=True)
 
 
@@ -182,6 +219,12 @@ def contains_buy_sell_recommendation(text: str) -> bool:
     return any(pattern.search(text or "") for pattern in _BUY_SELL_RECOMMENDATION_PATTERNS)
 
 
+def contains_price_prediction(text: str) -> bool:
+    """Detect target-price or future price prediction wording."""
+
+    return any(pattern.search(text or "") for pattern in _PRICE_PREDICTION_OUTPUT_PATTERNS)
+
+
 def sanitize_llm_output(text: str) -> str:
     """Apply post-call guardrails to an LLM answer.
 
@@ -195,6 +238,8 @@ def sanitize_llm_output(text: str) -> str:
     safe = mask_sensitive_text(text.strip())
     if contains_buy_sell_recommendation(safe):
         safe = NO_INVESTMENT_RECOMMENDATION_MESSAGE
+    if contains_price_prediction(safe):
+        safe = NO_PRICE_PREDICTION_MESSAGE
 
     if safe and INVESTMENT_DISCLAIMER not in safe:
         safe = f"{safe}\n\n{INVESTMENT_DISCLAIMER}"
