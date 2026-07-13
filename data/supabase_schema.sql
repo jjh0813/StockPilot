@@ -141,3 +141,14 @@ alter table public.watchlists
 alter table public.watchlists alter column session_id drop not null;
 create unique index if not exists watchlists_user_ticker_idx
   on public.watchlists (user_id, ticker) where user_id is not null;
+
+-- 로그인 사용자별 대화 저장 (제목·메시지·인사이트 전체를 data jsonb로)
+create table if not exists public.conversations (
+  id text primary key,
+  user_id bigint not null references public.users(id) on delete cascade,
+  data jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_conversations_user
+  on public.conversations (user_id, updated_at desc);
+alter table public.conversations enable row level security;

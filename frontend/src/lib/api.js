@@ -57,6 +57,20 @@ export async function removeWatchlist(ticker) {
   return jsonFetch(`/watchlist/${encodeURIComponent(ticker)}`, { method: "DELETE", auth: true });
 }
 
+// ── 대화 서버 저장(로그인 사용자별) ────────────
+export async function fetchConversations() {
+  return jsonFetch("/conversations/", { auth: true });
+}
+export async function saveConversationRemote(conv) {
+  return jsonFetch("/conversations/", { method: "PUT", body: conv, auth: true });
+}
+export async function bulkSaveConversations(list) {
+  return jsonFetch("/conversations/bulk", { method: "POST", body: list, auth: true });
+}
+export async function deleteConversationRemote(id) {
+  return jsonFetch(`/conversations/${encodeURIComponent(id)}`, { method: "DELETE", auth: true });
+}
+
 export async function streamChat(message, { sessionId = "web", model, onEvent, signal } = {}) {
   const res = await fetch(`${API_BASE}/chat/stream`, {
     method: "POST",
@@ -64,13 +78,7 @@ export async function streamChat(message, { sessionId = "web", model, onEvent, s
     body: JSON.stringify({ message, session_id: sessionId, model }),
     signal,
   });
-  if (!res.ok || !res.body) {
-    const data = await res.json().catch(() => ({}));
-    const detail = Array.isArray(data.detail)
-      ? data.detail.map((d) => d.msg || JSON.stringify(d)).join(", ")
-      : data.detail;
-    throw new Error(detail || `서버 오류 (${res.status})`);
-  }
+  if (!res.ok || !res.body) throw new Error(`서버 오류 (${res.status})`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
