@@ -493,5 +493,23 @@
     "category": "trading",
     "difficulty": "beginner",
     "source_url": "https://kind.krx.co.kr"
+  },
+  {
+    "term": "목표주가",
+    "aliases": ["목표가", "Target Price"],
+    "definition": "증권사나 애널리스트가 기업 분석을 바탕으로 제시하는 일정 기간 후의 예상 주가 수준입니다. 실제 주가를 보장하거나 매수·매도 신호를 뜻하는 것은 아니며, 가정과 분석 방법에 따라 달라질 수 있습니다.",
+    "example": "리포트의 목표주가는 참고 자료일 뿐이고, 투자자는 실적, 공시, 산업 상황, 리스크를 함께 확인해야 합니다.",
+    "category": "research",
+    "difficulty": "beginner",
+    "source_url": "https://kind.krx.co.kr"
+  },
+  {
+    "term": "적정주가",
+    "aliases": ["Fair Value", "적정 가치"],
+    "definition": "기업의 이익, 자산, 성장성, 업종 비교 등을 바탕으로 추정한 주가 수준입니다. 계산 방식과 가정에 따라 크게 달라질 수 있어 확정된 가격으로 볼 수 없습니다.",
+    "example": "PER, PBR, 현금흐름 할인법 같은 방법으로 적정주가를 추정할 수 있지만, 결과는 분석 가정에 따라 달라집니다.",
+    "category": "research",
+    "difficulty": "intermediate",
+    "source_url": "https://kind.krx.co.kr"
   }
 ]

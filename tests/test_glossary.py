@@ -32,6 +32,8 @@ def test_extract_term_from_definition_question():
     assert glossary.extract_term_from_query("상장이 뭐야") == "상장"
     assert glossary.extract_term_from_query("PER이 뭐야?") == "PER"
     assert glossary.extract_term_from_query("보호예수 설명해") == "보호예수"
+    assert glossary.extract_term_from_query("목표주가 뜻이 뭐야?") == "목표주가"
+    assert glossary.extract_term_from_query("적정주가 뜻") == "적정주가"
     assert glossary.extract_term_from_query("배고프다") is None
 
 

@@ -44,6 +44,8 @@ _INVESTMENT_RESEARCH_HINTS = (
     "시장",
 )
 
+_SPECIAL_TERMS_ENDING_WITH_PARTICLE = ("목표주가", "적정주가", "주가")
+
 
 def load_glossary_terms(path: Path) -> list[dict[str, Any]]:
     """Load glossary source JSON and validate the minimum contract."""
@@ -257,6 +259,14 @@ def extract_term_from_query(query: str) -> str | None:
     if not text:
         return None
 
+    for term in _SPECIAL_TERMS_ENDING_WITH_PARTICLE:
+        if re.search(
+            rf"{re.escape(term)}\s*(?:뭐야|무슨\s*뜻|뜻이야|뜻은|뜻|설명해|설명)",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return term
+
     patterns = (
         r"^(.+?)(?:이|가|은|는)?\s*(?:뭐야|무슨\s*뜻|뜻이야|뜻은|뜻|설명해|설명)",
         r"^(?:주식|투자|증권)\s+(.+?)\s*(?:뭐야|무슨\s*뜻|뜻|설명)",
@@ -274,7 +284,7 @@ def extract_term_from_query(query: str) -> str | None:
 def _clean_extracted_term(value: str) -> str | None:
     cleaned = value.strip(" ?!.,。！？\"'“”‘’")
     cleaned = re.sub(r"^(주식|투자|증권|금융)\s+", "", cleaned)
-    cleaned = re.sub(r"(이라는|이란|란|은|는|이|가)$", "", cleaned).strip()
+    cleaned = re.sub(r"(이라는|이란|란|은|는)$", "", cleaned).strip()
     if not cleaned or len(cleaned) > 40:
         return None
     return cleaned
