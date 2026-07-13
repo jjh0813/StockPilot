@@ -69,6 +69,7 @@ jobs:
         run: |
           printf '%s' "${{ secrets.GCE_SSH_PRIVATE_KEY }}" > "${RUNNER_TEMP}/gce_key"
           chmod 600 "${RUNNER_TEMP}/gce_key"
+          ssh-keygen -y -f "${RUNNER_TEMP}/gce_key" > "${RUNNER_TEMP}/gce_key.pub"
 
       - name: Archive deployment bundle
         shell: bash
@@ -89,6 +90,7 @@ jobs:
         shell: bash
         run: |
           gcloud compute scp \
+            --quiet \
             --project "${GCP_PROJECT_ID}" \
             --zone "${GCE_ZONE}" \
             --tunnel-through-iap \
@@ -100,6 +102,7 @@ jobs:
         shell: bash
         run: |
           gcloud compute ssh \
+            --quiet \
             "${{ vars.GCE_SSH_USER }}@${GCE_INSTANCE}" \
             --project "${GCP_PROJECT_ID}" \
             --zone "${GCE_ZONE}" \
