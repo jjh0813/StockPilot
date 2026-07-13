@@ -25,6 +25,15 @@ DEFAULT_UNIVERSE = [
     "셀트리온",
 ]
 
+TOOL_TIMEOUT_SECONDS = {
+    "get_stock_price": 20,
+    "get_news": 25,
+    "get_disclosure": 8,
+    "find_positive_news_stocks": 35,
+    "add_watchlist": 15,
+    "lookup_glossary_term": 10,
+}
+
 
 class ToolExecutor:
     """시세·뉴스·공시·관심 종목 도구를 단일 인터페이스로 실행합니다."""
@@ -51,20 +60,24 @@ class ToolExecutor:
 
             match tool_name:
                 case "get_stock_price":
-                    result = await self.get_stock_price(**validated_args)
+                    coroutine = self.get_stock_price(**validated_args)
                 case "get_news":
-                    result = await self.get_news(**validated_args)
+                    coroutine = self.get_news(**validated_args)
                 case "get_disclosure":
-                    result = await self.get_disclosure(**validated_args)
+                    coroutine = self.get_disclosure(**validated_args)
                 case "find_positive_news_stocks":
-                    result = await self.find_positive_news_stocks(**validated_args)
+                    coroutine = self.find_positive_news_stocks(**validated_args)
                 case "add_watchlist":
-                    result = await self.add_watchlist(
+                    coroutine = self.add_watchlist(
                         session_id=session_id,
                         **validated_args,
                     )
                 case "lookup_glossary_term":
-                    result = await self.lookup_glossary_term(**validated_args)
+                    coroutine = self.lookup_glossary_term(**validated_args)
+            result = await asyncio.wait_for(
+                coroutine,
+                timeout=TOOL_TIMEOUT_SECONDS.get(tool_name, 15),
+            )
             result = (
                 TOOL_RESULT_SCHEMAS[tool_name]
                 .model_validate(result)
