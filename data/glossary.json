@@ -457,5 +457,41 @@
     "category": "market",
     "difficulty": "beginner",
     "source_url": "https://kind.krx.co.kr"
+  },
+  {
+    "term": "매수",
+    "aliases": ["Buy", "매입"],
+    "definition": "주식이나 채권 같은 금융상품을 사는 행위를 말합니다. 투자 판단에서는 가격뿐 아니라 기업의 실적, 뉴스, 공시, 리스크를 함께 확인해야 합니다.",
+    "example": "투자자가 삼성전자 주식을 새로 사면 삼성전자 주식을 매수했다고 표현합니다.",
+    "category": "trading",
+    "difficulty": "beginner",
+    "source_url": "https://kind.krx.co.kr"
+  },
+  {
+    "term": "매도",
+    "aliases": ["Sell", "처분"],
+    "definition": "보유하고 있는 주식이나 채권 같은 금융상품을 파는 행위를 말합니다. 매도 여부는 수익률, 투자 목적, 리스크, 세금 등을 함께 고려해야 합니다.",
+    "example": "보유 중인 주식을 팔아 현금화하면 그 주식을 매도했다고 표현합니다.",
+    "category": "trading",
+    "difficulty": "beginner",
+    "source_url": "https://kind.krx.co.kr"
+  },
+  {
+    "term": "손절",
+    "aliases": ["손절매", "Stop Loss"],
+    "definition": "손실이 난 투자상품을 더 큰 손실을 막기 위해 파는 것을 말합니다. 보통 사전에 정한 손실 한도나 투자 원칙과 함께 사용됩니다.",
+    "example": "주가가 예상과 다르게 크게 하락해 정해둔 기준에 따라 파는 경우 손절이라고 부릅니다.",
+    "category": "trading",
+    "difficulty": "beginner",
+    "source_url": "https://kind.krx.co.kr"
+  },
+  {
+    "term": "익절",
+    "aliases": ["이익실현", "Take Profit"],
+    "definition": "이익이 난 투자상품을 팔아 수익을 확정하는 것을 말합니다. 주가가 더 오를 가능성과 반대로 하락할 위험을 함께 고려할 때 쓰는 표현입니다.",
+    "example": "매수가보다 오른 주식을 팔아 수익을 확정하면 익절했다고 표현합니다.",
+    "category": "trading",
+    "difficulty": "beginner",
+    "source_url": "https://kind.krx.co.kr"
   }
 ]

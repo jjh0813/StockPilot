@@ -38,6 +38,17 @@ async def test_router_node_listing_definition_is_rag():
     assert result["ticker"] == "상장이 뭐야"
 
 
+async def test_router_node_buy_sell_educational_definition_is_rag():
+    for question in ("매수 뜻이 뭐야?", "매도 뜻이 뭐야?", "손절이 뭐야?"):
+        state = create_initial_state(f"definition-{question}")
+        state["messages"] = [HumanMessage(content=question)]
+
+        result = await router_node(state)
+
+        assert result["intent"] == "rag"
+        assert result["tool_mode"] is None
+
+
 async def test_router_node_tool():
     state = create_initial_state("s")
     state["messages"] = [HumanMessage(content="삼성전자 요즘 어때?")]
