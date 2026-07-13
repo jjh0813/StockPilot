@@ -3,6 +3,47 @@ import { useEffect, useRef, useState } from 'react'
 import ResultCard from './ResultCard'
 import { streamChat } from '../lib/api'
 
+const MODEL_LABELS = {
+  solar: 'Solar',
+  'gpt-4o-mini': 'GPT-4o mini',
+  'gemini-3.1-flash-lite': 'Gemini',
+  'claude-haiku': 'Claude',
+}
+
+function modelFamily(value) {
+  const v = String(value || '').toLowerCase()
+  if (!v) return ''
+  if (v.includes('solar')) return 'solar'
+  if (v.includes('gpt')) return 'gpt'
+  if (v.includes('gemini')) return 'gemini'
+  if (v.includes('claude')) return 'claude'
+  if (v.includes('template')) return 'template'
+  return v
+}
+
+function modelLabel(value) {
+  const direct = MODEL_LABELS[value]
+  if (direct) return direct
+  const family = modelFamily(value)
+  if (family === 'solar') return 'Solar'
+  if (family === 'gpt') return 'GPT'
+  if (family === 'gemini') return 'Gemini'
+  if (family === 'claude') return 'Claude'
+  if (family === 'template') return '기본 템플릿'
+  return value || ''
+}
+
+function fallbackNotice(requestedModel, usedModel) {
+  if (!requestedModel || !usedModel) return ''
+  const requestedFamily = modelFamily(requestedModel)
+  const usedFamily = modelFamily(usedModel)
+  if (!requestedFamily || !usedFamily || requestedFamily === usedFamily) return ''
+  if (usedFamily === 'template') {
+    return `${modelLabel(requestedModel)} 응답에 실패해서 기본 템플릿으로 대체했습니다.`
+  }
+  return `${modelLabel(requestedModel)} 응답에 실패해서 ${modelLabel(usedModel)}로 대체했습니다.`
+}
+
 function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, onInsight }) {
   const [messages, setMessages] = useState(initialMessages || [])
   const [input, setInput] = useState('')
@@ -43,18 +84,31 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
 
   async function send(query) {
     if (!query || !query.trim() || busyRef.current) return
+    const requestedModel = model
     busyRef.current = true
     setBusy(true)
     setInput('')
     setMessages((prev) => [
       ...prev,
       { role: 'user', text: query },
-      { role: 'assistant', status: 'loading', thinking: '분석을 시작할게요...', price: null, answer: '', sources: [], terms: [], usedModel: '', errorMsg: '' },
+      {
+        role: 'assistant',
+        status: 'loading',
+        thinking: '분석을 시작할게요...',
+        price: null,
+        answer: '',
+        sources: [],
+        terms: [],
+        requestedModel,
+        usedModel: '',
+        modelNotice: '',
+        errorMsg: '',
+      },
     ])
     try {
       await streamChat(query, {
         sessionId,
-        model,
+        model: requestedModel,
         onEvent: (e) => {
           if (e.type === 'thinking') {
             patchLastAssistant({ thinking: e.content || '', status: 'loading' })
@@ -73,7 +127,10 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
           } else if (e.type === 'response') {
             const patch = {}
             if (e.content) patch.answer = e.content
-            if (e.model) patch.usedModel = e.model
+            if (e.model) {
+              patch.usedModel = e.model
+              patch.modelNotice = fallbackNotice(requestedModel, e.model)
+            }
             if (Object.keys(patch).length) patchLastAssistant(patch)
           } else if (e.type === 'glossary') {
             patchLastAssistant({ terms: e.terms || [] })

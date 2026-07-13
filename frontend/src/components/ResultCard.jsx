@@ -25,7 +25,7 @@ function dirWord(p) {
   return '보합'
 }
 
-function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms, usedModel }) {
+function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms, usedModel, modelNotice }) {
   const pct = price && price.change_pct !== null && price.change_pct !== undefined
     ? Number(price.change_pct)
     : null
@@ -34,6 +34,11 @@ function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms,
 
   return (
     <div className="w-full rounded-2xl border border-white/15 bg-white/5 p-6 backdrop-blur-lg">
+      {modelNotice && (
+        <div className="mb-2 rounded-xl border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
+          ⚠️ {modelNotice}
+        </div>
+      )}
       {usedModel && (
         <p className="mb-2 text-[12px] text-neutral-500">
           이 응답에는 {cleanModel(usedModel)}가 사용되었습니다
