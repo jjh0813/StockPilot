@@ -29,6 +29,7 @@ class StockPilotState(TypedDict, total=False):
     disclosures: list[dict[str, Any]]   # 최근 공시 목록 (4번째 도구)
     screen: Optional[bool]              # 급등·급락 스크리너 모드
     screener_results: Optional[Any]     # 스크리너 결과 목록
+    screener_panels: Optional[Any]      # 스크리너 상위 종목별 패널(시세·뉴스·공시)
     session_id: str
     user_id: Optional[str]
     model: Optional[str]        # 선택한 LLM 모델 id

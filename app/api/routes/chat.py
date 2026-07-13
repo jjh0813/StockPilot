@@ -49,11 +49,9 @@ def _build_state(request: ChatRequest) -> dict:
     return state
 
 
-def _tool_payload(node_output: dict) -> dict:
-    """tool 노드 결과에서 프론트가 쓸 시세·뉴스 요약을 추린다."""
-    price = node_output.get("price_data") or {}
-    news = node_output.get("news_items") or []
-    disclosures = node_output.get("disclosures") or []
+def _one_stock_payload(price: dict | None, news: list, disclosures: list) -> dict:
+    """단일 종목의 시세·뉴스·공시를 프론트 패널 형태로 정리한다."""
+    price = price or {}
     fundamentals = price.get("fundamentals") or None
     return {
         "price": (
@@ -79,7 +77,7 @@ def _tool_payload(node_output: dict) -> dict:
                 "source": item.get("source_domain"),
                 "session": item.get("market_session"),
             }
-            for item in news[:5]
+            for item in (news or [])[:5]
         ],
         # 좌측 패널 하단 "공시정보" 카드용 (4번째 도구: get_disclosure)
         "disclosures": [
@@ -89,9 +87,26 @@ def _tool_payload(node_output: dict) -> dict:
                 "date": d.get("received_date") or d.get("date"),
                 "corp": d.get("corp_name"),
             }
-            for d in disclosures[:8]
+            for d in (disclosures or [])[:8]
         ],
     }
+
+
+def _tool_payload(node_output: dict) -> dict:
+    """tool 노드 결과에서 프론트가 쓸 시세·뉴스·공시 요약을 추린다."""
+    payload = _one_stock_payload(
+        node_output.get("price_data"),
+        node_output.get("news_items") or [],
+        node_output.get("disclosures") or [],
+    )
+    # 급등 스크리너: 상위 종목별 패널을 순서대로 함께 내보낸다(가운데 스택용).
+    panels = node_output.get("screener_panels") or []
+    if panels:
+        payload["stocks"] = [
+            _one_stock_payload(p.get("price"), p.get("news") or [], p.get("disclosures") or [])
+            for p in panels
+        ]
+    return payload
 
 
 async def _match_glossary_terms(answer_text: str) -> list[dict]:

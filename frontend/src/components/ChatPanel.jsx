@@ -53,14 +53,15 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
     try { return localStorage.getItem('sp_model') || 'solar' } catch { return 'solar' }
   })
   const listRef = useRef(null)
+  const shouldScrollRef = useRef(false)
 
-  // 채팅 목록은 자체 컨테이너 안에서만 스크롤한다(가운데 주식 패널과 분리).
+  // 새 메시지를 "입력"했을 때만 맨 아래로 스크롤한다(입력 순간 한 번).
+  // 이후 응답 스트리밍 중에는 스크롤을 건드리지 않아 화면이 흔들리지 않는다.
   useEffect(() => {
     const el = listRef.current
-    if (!el) return
-    // 이미 맨 아래 근처일 때만 즉시 맨 아래로 고정 → 스트리밍 중 화면 흔들림 방지
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200
-    if (nearBottom) el.scrollTop = el.scrollHeight
+    if (!el || !shouldScrollRef.current) return
+    el.scrollTop = el.scrollHeight
+    shouldScrollRef.current = false
   }, [messages])
 
   useEffect(() => {
@@ -88,6 +89,7 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
     busyRef.current = true
     setBusy(true)
     setInput('')
+    shouldScrollRef.current = true   // 입력 순간에만 맨 아래로 내림
     setMessages((prev) => [
       ...prev,
       { role: 'user', text: query },
@@ -121,7 +123,16 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
               sources: news,
               status: 'streaming',
             })
-            if (tr.price) onInsight?.({ price: tr.price, news, disclosures })
+            if (Array.isArray(tr.stocks) && tr.stocks.length) {
+              // 급등 스크리너: 종목별 차트·뉴스·공시를 순서대로 가운데에 쌓는다.
+              tr.stocks.forEach((s) => {
+                if (!s || !s.price) return
+                const sNews = Array.isArray(s.news) ? s.news.filter((n) => n && n.url) : []
+                onInsight?.({ price: s.price, news: sNews, disclosures: s.disclosures || [] })
+              })
+            } else if (tr.price) {
+              onInsight?.({ price: tr.price, news, disclosures })
+            }
           } else if (e.type === 'token') {
             patchLastAssistant((m) => ({ status: 'streaming', answer: (m.answer || '') + (e.content || '') }))
           } else if (e.type === 'response') {

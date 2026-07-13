@@ -199,8 +199,11 @@ async def tool_node(state: StockPilotState) -> dict:
         result = await _executor.execute("find_positive_news_stocks", {})
         stocks = (result.get("data") or {}).get("stocks", [])
         logger.info(f"🔧 [Tool] 스크리너 완료 | 종목 {len(stocks)}개")
+        # 상위 종목별 시세·뉴스·공시를 병렬 수집 → 가운데 패널에 순서대로 표시
+        panels = await _collect_screener_panels(stocks[:5])
         return {
             "screener_results": stocks,
+            "screener_panels": panels,
             "tool_result": {"stocks": stocks},
             "tool_name": "find_positive_news_stocks",
         }
@@ -269,6 +272,39 @@ async def tool_node(state: StockPilotState) -> dict:
     }
 
 
+async def _collect_screener_panels(stocks: list[dict]) -> list[dict]:
+    """스크리너 상위 종목별로 시세·뉴스·공시를 병렬 수집해 패널 데이터로 만든다."""
+
+    async def _one(stock: dict) -> dict | None:
+        name = (stock or {}).get("ticker") or ""
+        if not name:
+            return None
+        try:
+            price = await _executor.execute("get_stock_price", {"ticker": name})
+        except Exception:
+            logger.warning(f"스크리너 패널 시세 실패: {name}")
+            return None
+        price_data = price.get("data")
+        if not price_data:
+            return None
+        try:
+            news = await _executor.execute("get_news", {"company": name, "direction": "up"})
+            news_items = [tag_session(item) for item in news.get("data", {}).get("news", [])]
+        except Exception:
+            news_items = []
+        disclosures: list[dict] = []
+        try:
+            query = (price_data or {}).get("ticker") or name
+            disc = await _executor.execute("get_disclosure", {"ticker": query})
+            disclosures = (disc.get("data") or {}).get("disclosures", []) or []
+        except Exception:
+            disclosures = []
+        return {"price": price_data, "news": news_items, "disclosures": disclosures}
+
+    results = await asyncio.gather(*(_one(s) for s in stocks))
+    return [r for r in results if r]
+
+
 def _format_change(change_pct: float | None) -> tuple[str, str]:
     """등락률 → (화살표, 방향 단어)."""
     if change_pct is None:
@@ -310,11 +346,11 @@ def _format_screener(stocks: list[dict]) -> str:
             "최근 상승 근거가 뚜렷한 종목을 찾지 못했어요.\n\n"
             "※ 투자 자문이 아닌 참고용 정보입니다."
         )
-    lines = ["📈 최근 상승 이슈가 뚜렷한 종목", ""]
+    lines = ["### 📈 최근 상승 이슈가 뚜렷한 종목", ""]
     for s in stocks[:5]:
         name = s.get("ticker", "")
         top = s.get("top_news") or "관련 이슈"
-        lines.append(f"• {name} — {top}")
+        lines.append(f"- **{name}** — {top}")
     lines.append("")
     lines.append("※ 상승 근거 뉴스 기준이며, 투자 자문이 아닌 참고용 정보입니다.")
     return "\n".join(lines)
