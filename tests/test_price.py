@@ -65,8 +65,10 @@ async def test_get_ohlcv_normalizes_pykrx_frame(monkeypatch):
     ]
 
 
-async def test_get_stock_snapshot_calculates_change(monkeypatch):
+async def test_get_stock_snapshot_prefers_pykrx_change_pct(monkeypatch):
     mock = stock_snapshot()
+    mock["ohlcv"] = [dict(row) for row in mock["ohlcv"]]
+    mock["ohlcv"][-1]["change_pct"] = 1.95
 
     async def fake_get_ohlcv(*args, **kwargs):
         return mock["ohlcv"]
@@ -86,6 +88,37 @@ async def test_get_stock_snapshot_calculates_change(monkeypatch):
     assert snapshot["ticker"] == "005930"
     assert snapshot["current_price"] == 71400
     assert snapshot["change"] == 1400
-    assert snapshot["change_pct"] == 2.0
+    assert snapshot["change_pct"] == 1.95
     assert snapshot["fundamentals_available"] is True
     StockPriceData.model_validate(snapshot)
+
+
+async def test_get_stock_snapshot_reuses_short_live_cache(monkeypatch):
+    with price._SNAPSHOT_CACHE_LOCK:
+        price._SNAPSHOT_CACHE.clear()
+
+    calls = 0
+
+    async def fake_get_ohlcv(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        mock = stock_snapshot()
+        rows = [dict(row) for row in mock["ohlcv"]]
+        rows[-1]["close"] = 71400 + calls * 100
+        rows[-1]["change_pct"] = 2.0 + calls
+        return rows
+
+    async def fake_get_fundamentals(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(price, "get_ohlcv", fake_get_ohlcv)
+    monkeypatch.setattr(price, "get_fundamentals", fake_get_fundamentals)
+
+    first = await price.get_stock_snapshot("삼성전자", period="1m")
+    second = await price.get_stock_snapshot("삼성전자", period="1m")
+
+    assert calls == 1
+    assert second == first
+
+    with price._SNAPSHOT_CACHE_LOCK:
+        price._SNAPSHOT_CACHE.clear()

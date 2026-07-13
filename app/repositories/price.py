@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from copy import deepcopy
 import io
 import math
 import threading
 import os
 import re
 from datetime import date, datetime, timedelta
+from time import monotonic
 from typing import Any
 
 from loguru import logger
@@ -106,6 +108,9 @@ _NAME_INDEX: list[tuple[str, str]] | None = None   # (정규화된_이름, 코�
 _CODE_NAME: dict[str, str] = {}
 _INDEX_LOCK = threading.Lock()
 _SENSITIVE_STDIO_LOCK = threading.Lock()
+_SNAPSHOT_CACHE_LOCK = threading.Lock()
+_SNAPSHOT_CACHE_TTL_SECONDS = 60
+_SNAPSHOT_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
 
 
 class PriceDataError(RuntimeError):
@@ -229,6 +234,14 @@ async def get_stock_snapshot(
 
     code = await resolve_ticker(ticker)
     end_date = _parse_date(end) if end else date.today()
+    cache_key = (code, period, end_date.isoformat())
+    use_live_cache = end is None
+    if use_live_cache:
+        cached = _get_cached_snapshot(cache_key)
+        if cached is not None:
+            logger.debug(f"[Price] cached snapshot hit: ticker={code}, period={period}")
+            return cached
+
     start_date = end_date - timedelta(days=_PERIOD_DAYS[period])
     ohlcv = await get_ohlcv(code, start_date.isoformat(), end_date.isoformat())
     latest = ohlcv[-1]
@@ -237,13 +250,17 @@ async def get_stock_snapshot(
     current_price = latest.get("close")
     previous_close = previous.get("close") if previous else None
     change = None
-    change_pct = None
     if current_price is not None and previous_close not in (None, 0):
         change = current_price - previous_close
+
+    # pykrx가 내려준 일봉의 "등락률" 컬럼을 단일 기준값으로 사용한다.
+    # 값이 누락된 경우에만 종가와 전일 종가로 보수적으로 재계산한다.
+    change_pct = _coerce_pct(latest.get("change_pct"))
+    if change_pct is None and change is not None and previous_close not in (None, 0):
         change_pct = round(change / previous_close * 100, 2)
 
     fundamentals = await get_fundamentals(code, as_of=end_date.isoformat())
-    return {
+    snapshot = {
         "ticker": code,
         "name": _TICKER_NAMES.get(code) or _CODE_NAME.get(code) or ticker,
         "as_of": latest["date"],
@@ -256,6 +273,41 @@ async def get_stock_snapshot(
         "fundamentals": fundamentals,
         "fundamentals_available": fundamentals is not None,
     }
+    if use_live_cache:
+        _set_cached_snapshot(cache_key, snapshot)
+    return snapshot
+
+
+def _get_cached_snapshot(cache_key: tuple[str, str, str]) -> dict[str, Any] | None:
+    now = monotonic()
+    with _SNAPSHOT_CACHE_LOCK:
+        cached = _SNAPSHOT_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        created_at, snapshot = cached
+        if now - created_at > _SNAPSHOT_CACHE_TTL_SECONDS:
+            _SNAPSHOT_CACHE.pop(cache_key, None)
+            return None
+        return deepcopy(snapshot)
+
+
+def _set_cached_snapshot(cache_key: tuple[str, str, str], snapshot: dict[str, Any]) -> None:
+    with _SNAPSHOT_CACHE_LOCK:
+        _SNAPSHOT_CACHE[cache_key] = (monotonic(), deepcopy(snapshot))
+
+
+def _coerce_pct(value: Any) -> float | None:
+    value = _python_number(value)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return round(float(value), 2)
+    try:
+        return round(float(value), 2)
+    except (TypeError, ValueError):
+        return None
 
 
 def _get_stock_api() -> Any:
