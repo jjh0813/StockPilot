@@ -57,11 +57,11 @@ export async function removeWatchlist(ticker) {
   return jsonFetch(`/watchlist/${encodeURIComponent(ticker)}`, { method: "DELETE", auth: true });
 }
 
-export async function streamChat(message, { sessionId = "web", onEvent, signal } = {}) {
+export async function streamChat(message, { sessionId = "web", model, onEvent, signal } = {}) {
   const res = await fetch(`${API_BASE}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, session_id: sessionId }),
+    body: JSON.stringify({ message, session_id: sessionId, model }),
     signal,
   });
   if (!res.ok || !res.body) throw new Error(`서버 오류 (${res.status})`);

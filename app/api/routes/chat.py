@@ -23,7 +23,7 @@ _THINKING_MESSAGE = {
 
 def _build_state(request: ChatRequest) -> dict:
     """요청으로부터 그래프 초기 상태를 만들고 사용자 메시지를 넣는다."""
-    state = create_initial_state(request.session_id, request.user_id)
+    state = create_initial_state(request.session_id, request.user_id, model=request.model)
     state["messages"] = [HumanMessage(content=request.message)]
     return state
 
@@ -108,6 +108,7 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
     tool_used = None
     streamed_token = False
     answer_text = ""
+    used_model = None
     try:
         async for mode, chunk in graph.astream(
             _build_state(request),
@@ -149,20 +150,23 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
                         tool_result=_tool_payload(node_output),
                     ).to_sse()
                 # 토큰 스트리밍이 안 된 경우(폴백)에만 최종 답을 한 번에 전송
-                if node_name == "response" and not streamed_token:
-                    messages = node_output.get("messages") or []
-                    content = messages[-1].content if messages else ""
-                    answer_text = content
-                    yield StreamEvent(
-                        type="response",
-                        node="response",
-                        content=content,
-                        tool_used=tool_used,
-                    ).to_sse()
+                if node_name == "response":
+                    used_model = node_output.get("used_model") or used_model
+                    if not streamed_token:
+                        messages = node_output.get("messages") or []
+                        content = messages[-1].content if messages else ""
+                        answer_text = content
+                        yield StreamEvent(
+                            type="response",
+                            node="response",
+                            content=content,
+                            tool_used=tool_used,
+                            model=used_model,
+                        ).to_sse()
 
         # 토큰으로 흘린 경우: 완료 신호로 tool_used만 담은 response 이벤트
         if streamed_token:
-            yield StreamEvent(type="response", node="response", tool_used=tool_used).to_sse()
+            yield StreamEvent(type="response", node="response", tool_used=tool_used, model=used_model).to_sse()
 
         # 답변 텍스트 안에 등장하는 투자 용어를 찾아 밑줄 각주용으로 흘려보낸다.
         terms = await _match_glossary_terms(answer_text)

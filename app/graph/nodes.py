@@ -339,8 +339,10 @@ async def response_node(state: StockPilotState) -> dict:
                 "뉴스 내용이 반대로 보여도 실제 등락률 부호(+ 상승 / - 하락)를 기준으로 설명하라."
             )
 
+    requested_model = state.get("model")
+    used_model = requested_model or "solar"
     try:
-        llm = get_llm()
+        llm = get_llm(requested_model)
         response = await asyncio.wait_for(
             llm.ainvoke(
                 [
@@ -350,12 +352,16 @@ async def response_node(state: StockPilotState) -> dict:
             ),
             timeout=45,
         )
+        # 실제 응답을 만든 모델(폴백됐다면 폴백 모델)을 메타데이터에서 추출
+        meta = getattr(response, "response_metadata", None) or {}
+        used_model = meta.get("model_name") or meta.get("model") or used_model
         answer = (response.content or "").strip()
         if not answer:
             answer = _fallback_answer(price, news_items, docs)
     except Exception as exc:
-        logger.warning(f"Solar 응답 실패, 템플릿으로 폴백: {type(exc).__name__}: {exc}")
+        logger.warning(f"LLM 응답 실패, 템플릿으로 폴백: {type(exc).__name__}: {exc}")
         answer = _fallback_answer(price, news_items, docs)
+        used_model = "template-fallback"
 
-    logger.info("💬 [Response] 응답 생성 완료")
-    return {"messages": [AIMessage(content=answer)]}
+    logger.info(f"💬 [Response] 응답 생성 완료 (model={used_model})")
+    return {"messages": [AIMessage(content=answer)], "used_model": used_model}

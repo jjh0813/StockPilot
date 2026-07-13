@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-secret-change-me"
     jwt_expire_minutes: int = 60 * 24 * 7  # 7일
 
+    # ── 추가 LLM 제공자 (모델 라우팅/폴백용) ──
+    openai_api_key: str | None = None
+    gemini_api_key: str | None = None
+    anthropic_api_key: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -9,6 +9,11 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     """클라이언트 → 서버 채팅 요청."""
 
+    model: Optional[str] = Field(
+        default=None,
+        description="사용할 LLM 모델 id (미지정 시 기본 solar). 예: gpt-4o-mini, gemini-2.0-flash, claude-haiku",
+    )
+
     message: str = Field(
         ...,
         min_length=1,
@@ -67,6 +72,7 @@ class StreamEvent(BaseModel):
     terms: Optional[list[dict[str, Any]]] = Field(
         default=None, description="답변 텍스트 안에서 매칭된 용어 사전 항목"
     )
+    model: Optional[str] = Field(default=None, description="실제 응답을 생성한 모델 이름")
     error: Optional[str] = Field(default=None, description="에러 메시지")
 
     def to_sse(self) -> str:

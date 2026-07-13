@@ -8,6 +8,9 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
+  const [model, setModel] = useState(() => {
+    try { return localStorage.getItem('sp_model') || 'solar' } catch { return 'solar' }
+  })
   const listRef = useRef(null)
 
   // 채팅 목록은 자체 컨테이너 안에서만 스크롤한다(가운데 주식 패널과 분리).
@@ -46,11 +49,12 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
     setMessages((prev) => [
       ...prev,
       { role: 'user', text: query },
-      { role: 'assistant', status: 'loading', thinking: '분석을 시작할게요...', price: null, answer: '', sources: [], terms: [], errorMsg: '' },
+      { role: 'assistant', status: 'loading', thinking: '분석을 시작할게요...', price: null, answer: '', sources: [], terms: [], usedModel: '', errorMsg: '' },
     ])
     try {
       await streamChat(query, {
         sessionId,
+        model,
         onEvent: (e) => {
           if (e.type === 'thinking') {
             patchLastAssistant({ thinking: e.content || '', status: 'loading' })
@@ -67,7 +71,10 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
           } else if (e.type === 'token') {
             patchLastAssistant((m) => ({ status: 'streaming', answer: (m.answer || '') + (e.content || '') }))
           } else if (e.type === 'response') {
-            if (e.content) patchLastAssistant({ answer: e.content })
+            const patch = {}
+            if (e.content) patch.answer = e.content
+            if (e.model) patch.usedModel = e.model
+            if (Object.keys(patch).length) patchLastAssistant(patch)
           } else if (e.type === 'glossary') {
             patchLastAssistant({ terms: e.terms || [] })
           } else if (e.type === 'error') {
@@ -130,6 +137,21 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
             placeholder="종목이나 궁금한 점을 입력하세요"
             className="flex-1 bg-transparent px-4 py-2 text-white placeholder-neutral-400 outline-none disabled:opacity-50"
           />
+          <select
+            value={model}
+            onChange={(e) => {
+              setModel(e.target.value)
+              try { localStorage.setItem('sp_model', e.target.value) } catch { /* 무시 */ }
+            }}
+            disabled={busy}
+            title="응답 생성에 사용할 모델 (실패 시 다른 모델로 자동 폴백)"
+            className="rounded-xl border border-white/15 bg-white/5 px-2 py-2 text-sm text-neutral-200 outline-none disabled:opacity-50 [&>option]:text-black"
+          >
+            <option value="solar">Solar</option>
+            <option value="gpt-4o-mini">GPT-4o mini</option>
+            <option value="gemini-2.0-flash">Gemini</option>
+            <option value="claude-haiku">Claude</option>
+          </select>
           <button
             type="submit"
             disabled={busy}

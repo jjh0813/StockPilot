@@ -1,5 +1,13 @@
 import GlossaryAnswer from './GlossaryAnswer'
 
+function cleanModel(m) {
+  if (!m) return ''
+  let s = String(m)
+  if (s.includes('/')) s = s.split('/').pop()   // gemini/gemini-2.0-flash → gemini-2.0-flash
+  if (s.toLowerCase().includes('template')) return '기본 템플릿(오프라인 폴백)'
+  return s
+}
+
 function formatPct(p) {
   const a = Math.abs(p).toFixed(2)
   if (p > 0) return `▲ ${a}%`
@@ -17,7 +25,7 @@ function dirWord(p) {
   return '보합'
 }
 
-function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms }) {
+function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms, usedModel }) {
   const pct = price && price.change_pct !== null && price.change_pct !== undefined
     ? Number(price.change_pct)
     : null
@@ -26,6 +34,11 @@ function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms 
 
   return (
     <div className="w-full rounded-2xl border border-white/15 bg-white/5 p-6 backdrop-blur-lg">
+      {usedModel && (
+        <p className="mb-2 text-[12px] text-neutral-500">
+          이 응답에는 {cleanModel(usedModel)}가 사용되었습니다
+        </p>
+      )}
       {showThinking && (
         <div className="flex items-center gap-2 text-neutral-300">
           <span className="flex gap-1">

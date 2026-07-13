@@ -29,11 +29,14 @@ class StockPilotState(TypedDict, total=False):
     screener_results: Optional[Any]     # 스크리너 결과 목록
     session_id: str
     user_id: Optional[str]
+    model: Optional[str]        # 선택한 LLM 모델 id
+    used_model: Optional[str]   # 실제 응답을 만든 모델(폴백 반영)
 
 
 def create_initial_state(
     session_id: str,
     user_id: str | None = None,
+    model: str | None = None,
 ) -> StockPilotState:
     """초기 상태 생성. 그래프 실행 시작 시 사용한다."""
     return {
@@ -51,4 +54,5 @@ def create_initial_state(
         "screener_results": None,
         "session_id": session_id,
         "user_id": user_id,
+        "model": model,
     }
