@@ -40,13 +40,16 @@ _DISCLOSURE_CACHE: dict[tuple[str, int], tuple[float, list[dict]]] = {}
 
 _KNOWN_CORPORATIONS = [
     Corporation("00126380", "삼성전자", "005930"),
+    Corporation("00164779", "SK하이닉스", "000660"),
     Corporation("00266961", "NAVER", "035420"),
     Corporation("00258801", "카카오", "035720"),
 ]
 
 _KNOWN_CORPORATION_ALIASES: dict[str, Corporation] = {
     "삼전": _KNOWN_CORPORATIONS[0],
-    "네이버": _KNOWN_CORPORATIONS[1],
+    "하이닉스": _KNOWN_CORPORATIONS[1],
+    "sk하이닉스": _KNOWN_CORPORATIONS[1],
+    "네이버": _KNOWN_CORPORATIONS[2],
 }
 
 

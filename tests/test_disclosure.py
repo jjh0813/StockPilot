@@ -99,9 +99,15 @@ async def test_resolve_known_corporation_without_corp_code_download(monkeypatch)
     client = DartClient("test-key")
     by_stock_code = await client.resolve_corporation("005930")
     by_name = await client.resolve_corporation("삼성전자")
+    sk_by_stock_code = await client.resolve_corporation("000660")
+    sk_by_name = await client.resolve_corporation("SK하이닉스")
+    sk_by_alias = await client.resolve_corporation("하이닉스")
 
     assert by_stock_code.corp_code == "00126380"
     assert by_name.stock_code == "005930"
+    assert sk_by_stock_code.corp_code == "00164779"
+    assert sk_by_name.stock_code == "000660"
+    assert sk_by_alias.corp_code == "00164779"
 
 
 @pytest.mark.asyncio

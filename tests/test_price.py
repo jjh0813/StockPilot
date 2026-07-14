@@ -83,6 +83,7 @@ async def test_get_stock_snapshot_prefers_pykrx_change_pct(monkeypatch):
         "삼성전자",
         period="1m",
         end=date(2026, 7, 9).isoformat(),
+        include_fundamentals=True,
     )
 
     assert snapshot["ticker"] == "005930"

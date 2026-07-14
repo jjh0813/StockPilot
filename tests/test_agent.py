@@ -80,11 +80,7 @@ async def test_router_node_positive_news_screener_variants(monkeypatch):
         assert result["screen"] is True
         assert result["ticker"] is None
 
-    assert routed_queries == [
-        "최근 급등한 종목 알려줘",
-        "호재 있는 종목 알려줘",
-        "좋은 뉴스 나온 종목 알려줘",
-    ]
+    assert routed_queries == []
 
 
 async def test_router_node_screener_rule_fallback_when_llm_router_fails(monkeypatch):

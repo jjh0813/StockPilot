@@ -271,6 +271,12 @@ async def router_node(state: StockPilotState) -> dict:
                 intent = "rag" if is_rag else "tool"
                 tool_mode = "market" if intent == "tool" else None
         else:
+            # 명확한 스크리너 표현은 고신뢰 룰로 즉시 처리한다.
+            # LLM 라우터는 애매한 투자/뉴스 질문에만 보조적으로 사용해 지연과 비용을 줄인다.
+            if _is_screener_query(text, wants_definition=wants_definition):
+                logger.info("🔀 [Router] intent=tool (rule screener)")
+                return {"intent": "tool", "screen": True, "ticker": None}
+
             if _should_ask_llm_router(text):
                 logger.info("🔀 [Router] asking LLM router")
                 route = await _llm_route_query(text)
@@ -292,11 +298,6 @@ async def router_node(state: StockPilotState) -> dict:
                         wants_definition=wants_definition,
                     ):
                         return {"intent": "chat", "screen": False, "ticker": None}
-
-            # LLM이 실패하거나 보수적으로 chat을 냈더라도, 명확한 스크리너 표현이면 룰로 복구한다.
-            if _is_screener_query(text, wants_definition=wants_definition):
-                logger.info("🔀 [Router] intent=tool (rule screener fallback)")
-                return {"intent": "tool", "screen": True, "ticker": None}
 
             logger.info("🔀 [Router] intent=chat (out-of-scope)")
             return {"intent": "chat", "screen": False, "ticker": None}
@@ -378,21 +379,23 @@ async def tool_node(state: StockPilotState) -> dict:
         )
     else:
         direction = requested_direction or actual_direction
-    news = await _executor.execute(
-        "get_news",
-        {"company": ticker, "direction": direction},
+    disclosure_query = (price.get("data") or {}).get("ticker") or ticker
+    news_task = asyncio.create_task(
+        _executor.execute("get_news", {"company": ticker, "direction": direction})
     )
+    disclosure_task = asyncio.create_task(
+        _executor.execute("get_disclosure", {"ticker": disclosure_query})
+    )
+    news, disc = await asyncio.gather(news_task, disclosure_task)
     news_items = news.get("data", {}).get("news", [])
     news_items = [tag_session(item) for item in news_items]
 
     # 4번째 도구: 공시(DART). 자격 증명이 없거나 실패해도 분석은 계속 진행한다.
     disclosures: list[dict] = []
-    try:
-        disclosure_query = (price.get("data") or {}).get("ticker") or ticker
-        disc = await _executor.execute("get_disclosure", {"ticker": disclosure_query})
+    if disc.get("success"):
         disclosures = (disc.get("data") or {}).get("disclosures", []) or []
-    except Exception:
-        logger.warning("공시 수집 실패 — 공시 없이 진행")
+    else:
+        logger.warning(f"공시 수집 실패 — 공시 없이 진행: {disc.get('error')}")
 
     logger.info(
         f"🔧 [Tool] 수집 완료 | 뉴스 {len(news_items)}건 | 공시 {len(disclosures)}건"

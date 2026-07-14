@@ -152,6 +152,7 @@ async def get_ohlcv(ticker: str, start: str, end: str) -> list[dict[str, Any]]:
     stock = _get_stock_api()
     try:
         frame = await asyncio.to_thread(
+            _call_public_krx,
             stock.get_market_ohlcv_by_date,
             start_date.strftime("%Y%m%d"),
             end_date.strftime("%Y%m%d"),
@@ -255,6 +256,7 @@ async def get_stock_snapshot(
     *,
     period: str = "3m",
     end: str | None = None,
+    include_fundamentals: bool = False,
 ) -> dict[str, Any]:
     """현재가·등락률·일봉·재무지표를 한 번에 반환합니다."""
     if period not in _PERIOD_DAYS:
@@ -288,7 +290,11 @@ async def get_stock_snapshot(
     if change_pct is None and change is not None and previous_close not in (None, 0):
         change_pct = round(change / previous_close * 100, 2)
 
-    fundamentals = await get_fundamentals(code, as_of=end_date.isoformat())
+    fundamentals = (
+        await get_fundamentals(code, as_of=end_date.isoformat())
+        if include_fundamentals
+        else None
+    )
     snapshot = {
         "ticker": code,
         "name": _TICKER_NAMES.get(code) or _CODE_NAME.get(code) or ticker,
@@ -340,19 +346,42 @@ def _coerce_pct(value: Any) -> float | None:
 
 
 def _get_stock_api() -> Any:
-    if settings.krx_id and settings.krx_pw:
-        os.environ.setdefault("KRX_ID", settings.krx_id)
-        os.environ.setdefault("KRX_PW", settings.krx_pw)
+    # Public price reads do not need a KRX login. If KRX_ID/KRX_PW are present,
+    # pykrx may try to authenticate at import time and block for 10+ seconds.
+    # Hide credentials during import so the market-data path stays fast.
+    return _call_with_suppressed_stdio(_import_public_stock_api)
 
-    # pykrx는 import 시 KRX 세션을 초기화하며 로그인 ID를 stdout에 출력할 수 있으므로
-    # 자격 증명 설정 후, 민감 로그를 억제한 상태에서 지연 import한다.
-    return _call_with_suppressed_stdio(_import_stock_api)
+
+def _import_public_stock_api() -> Any:
+    saved_id = os.environ.pop("KRX_ID", None)
+    saved_pw = os.environ.pop("KRX_PW", None)
+    try:
+        return _import_stock_api()
+    finally:
+        if saved_id is not None:
+            os.environ["KRX_ID"] = saved_id
+        if saved_pw is not None:
+            os.environ["KRX_PW"] = saved_pw
 
 
 def _import_stock_api() -> Any:
     from pykrx import stock
 
     return stock
+
+
+def _call_public_krx(func: Any, *args: Any, **kwargs: Any) -> Any:
+    """Call public KRX data APIs without triggering credential-based login."""
+
+    saved_id = os.environ.pop("KRX_ID", None)
+    saved_pw = os.environ.pop("KRX_PW", None)
+    try:
+        return _call_with_suppressed_stdio(func, *args, **kwargs)
+    finally:
+        if saved_id is not None:
+            os.environ["KRX_ID"] = saved_id
+        if saved_pw is not None:
+            os.environ["KRX_PW"] = saved_pw
 
 
 def _call_with_suppressed_stdio(func: Any, *args: Any, **kwargs: Any) -> Any:
@@ -370,7 +399,11 @@ def _build_name_index() -> None:
     for back in range(0, 8):  # 주말·휴장 대비 최근 영업일까지 후퇴
         lookup_date = (date.today() - timedelta(days=back)).strftime("%Y%m%d")
         try:
-            codes = stock.get_market_ticker_list(lookup_date, market="ALL")
+            codes = _call_public_krx(
+                stock.get_market_ticker_list,
+                lookup_date,
+                market="ALL",
+            )
         except Exception:
             codes = []
         if codes:
@@ -379,7 +412,7 @@ def _build_name_index() -> None:
     pairs: list[tuple[str, str]] = []
     for code in codes:
         try:
-            name = stock.get_market_ticker_name(code)
+            name = _call_public_krx(stock.get_market_ticker_name, code)
         except Exception:
             continue
         if not name:
