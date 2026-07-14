@@ -438,9 +438,9 @@ def _requested_direction_from_text(text: str) -> str:
 def _actual_direction_from_change(change_pct: float | None) -> str:
     """실제 등락률에서 상승/하락/중립 방향을 계산한다."""
 
-    if change_pct is not None and change_pct <= -0.5:
+    if change_pct is not None and change_pct < 0:
         return "down"
-    if change_pct is not None and change_pct >= 0.5:
+    if change_pct is not None and change_pct > 0:
         return "up"
     return "neutral"
 
