@@ -1,7 +1,7 @@
 """에이전트/그래프 단위 테스트 (네트워크·API 키 불필요)."""
 from langchain_core.messages import HumanMessage
 from app.graph.edges import route_by_intent
-from app.graph.nodes import OUT_OF_SCOPE_MESSAGE, _format_change, response_node, router_node
+from app.graph.nodes import OUT_OF_SCOPE_MESSAGE, _format_change, response_node, router_node, tool_node
 from app.graph.state import create_initial_state
 from app.tools.executor import _normalize_news_item
 from tests.fixtures.tool_responses import directional_news_item, stock_snapshot
@@ -239,4 +239,74 @@ async def test_response_node_format():
     assert "삼성전자" in content
     assert "▼" in content and "하락" in content
     assert "원인 분석" in content
+    assert "투자 자문이 아닌" in content
+
+
+async def test_tool_node_corrects_requested_down_when_actual_price_is_up(monkeypatch):
+    calls = []
+
+    async def fake_execute(tool_name, tool_args=None, session_id="default"):
+        calls.append((tool_name, tool_args or {}))
+        if tool_name == "get_stock_price":
+            return {
+                "success": True,
+                "data": {
+                    **stock_snapshot(),
+                    "name": "삼성전자",
+                    "change_pct": 1.77,
+                },
+            }
+        if tool_name == "get_news":
+            assert tool_args["direction"] == "up"
+            item = directional_news_item()
+            item.update(
+                {
+                    "direction": "up",
+                    "direction_keywords": ["상승", "호재"],
+                    "has_direction_evidence": True,
+                }
+            )
+            return {"success": True, "data": {"news": [item]}}
+        if tool_name == "get_disclosure":
+            return {"success": True, "data": {"disclosures": []}}
+        raise AssertionError(f"unexpected tool: {tool_name}")
+
+    monkeypatch.setattr("app.graph.nodes._executor.execute", fake_execute)
+
+    state = create_initial_state("direction-correction")
+    state["ticker"] = "삼성전자"
+    state["messages"] = [HumanMessage(content="왜 떨어졌어?")]
+
+    result = await tool_node(state)
+
+    news_call = next(args for name, args in calls if name == "get_news")
+    assert news_call["direction"] == "up"
+    assert "하락 원인 대신 최근 상승" in result["direction_notice"]
+    assert result["tool_result"]["direction_notice"] == result["direction_notice"]
+
+
+async def test_response_node_prepends_direction_notice_when_llm_omits_it(monkeypatch):
+    class FakeResult:
+        message = type("Message", (), {"content": "삼성전자 ▲ 1.77% 상승\n\n원인 분석"})()
+        model_name = "fake-router-model"
+        model_id = "solar"
+        fallback_used = False
+
+    async def fake_ainvoke(*args, **kwargs):
+        return FakeResult()
+
+    monkeypatch.setattr("app.graph.nodes.ainvoke_with_fallback", fake_ainvoke)
+
+    notice = "현재 삼성전자는 상승 중이라, 요청하신 하락 원인 대신 최근 상승과 관련 있어 보이는 뉴스를 기준으로 정리합니다."
+    state = create_initial_state("direction-notice-response")
+    state["ticker"] = "삼성전자"
+    state["price_data"] = {**stock_snapshot(), "change_pct": 1.77}
+    state["news_items"] = [_normalize_news_item(directional_news_item(), "up")]
+    state["direction_notice"] = notice
+    state["messages"] = [HumanMessage(content="왜 떨어졌어?")]
+
+    result = await response_node(state)
+    content = result["messages"][-1].content
+
+    assert content.startswith(notice)
     assert "투자 자문이 아닌" in content

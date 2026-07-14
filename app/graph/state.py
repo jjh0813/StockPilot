@@ -27,6 +27,7 @@ class StockPilotState(TypedDict, total=False):
     price_data: Optional[Any]
     news_items: list[dict[str, Any]]
     disclosures: list[dict[str, Any]]   # 최근 공시 목록 (4번째 도구)
+    direction_notice: Optional[str]      # 질문 방향과 실제 등락 방향이 다를 때 사용자 안내
     screen: Optional[bool]              # 급등·급락 스크리너 모드
     screener_results: Optional[Any]     # 스크리너 결과 목록
     screener_panels: Optional[Any]      # 스크리너 상위 종목별 패널(시세·뉴스·공시)
@@ -54,6 +55,7 @@ def create_initial_state(
         "price_data": None,
         "news_items": [],
         "disclosures": [],
+        "direction_notice": None,
         "screen": False,
         "screener_results": None,
         "session_id": session_id,

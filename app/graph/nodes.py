@@ -358,16 +358,27 @@ async def tool_node(state: StockPilotState) -> dict:
     price = await _executor.execute("get_stock_price", {"ticker": ticker})
     user_text = _last_user_text(state)
     change_pct = (price.get("data") or {}).get("change_pct")
-    if any(keyword in user_text for keyword in ("떨어", "하락", "급락", "약세", "악재", "나쁜 뉴스", "부정 뉴스")):
-        direction = "down"
-    elif any(keyword in user_text for keyword in ("올라", "상승", "급등", "강세", "호재", "좋은 뉴스", "긍정 뉴스")):
-        direction = "up"
-    elif change_pct is not None and change_pct <= -0.5:
-        direction = "down"
-    elif change_pct is not None and change_pct >= 0.5:
-        direction = "up"
+    requested_direction = _requested_direction_from_text(user_text)
+    actual_direction = _actual_direction_from_change(change_pct)
+    direction_notice = None
+    if (
+        requested_direction in {"up", "down"}
+        and actual_direction in {"up", "down"}
+        and requested_direction != actual_direction
+    ):
+        direction = actual_direction
+        name = (price.get("data") or {}).get("name") or ticker or "해당 종목"
+        direction_notice = (
+            f"현재 {_topic_subject(name)} {_direction_word(actual_direction)} 중이라, "
+            f"요청하신 {_direction_word(requested_direction)} 원인 대신 최근 "
+            f"{_direction_word(actual_direction)}과 관련 있어 보이는 뉴스를 기준으로 정리합니다."
+        )
+        logger.info(
+            "🔁 [Tool] 질문 방향과 실제 등락 방향 불일치: "
+            f"requested={requested_direction}, actual={actual_direction}"
+        )
     else:
-        direction = "neutral"
+        direction = requested_direction or actual_direction
     news = await _executor.execute(
         "get_news",
         {"company": ticker, "direction": direction},
@@ -391,10 +402,12 @@ async def tool_node(state: StockPilotState) -> dict:
         "price_data": price.get("data"),
         "news_items": news_items,
         "disclosures": disclosures,
+        "direction_notice": direction_notice,
         "tool_result": {
             "price": price.get("data"),
             "news": news_items,
             "disclosures": disclosures,
+            "direction_notice": direction_notice,
         },
         "tool_name": "get_stock_price,get_news,get_disclosure",
         "tool_mode": "market",
@@ -412,9 +425,52 @@ def _format_change(change_pct: float | None) -> tuple[str, str]:
     return "―", "보합"
 
 
-def _tool_context(price: dict, news_items: list[dict]) -> str:
+def _requested_direction_from_text(text: str) -> str:
+    """사용자가 질문에서 명시한 상승/하락 방향을 추출한다."""
+
+    if any(keyword in text for keyword in ("떨어", "하락", "급락", "약세", "악재", "나쁜 뉴스", "부정 뉴스")):
+        return "down"
+    if any(keyword in text for keyword in ("올라", "상승", "급등", "강세", "호재", "좋은 뉴스", "긍정 뉴스")):
+        return "up"
+    return "neutral"
+
+
+def _actual_direction_from_change(change_pct: float | None) -> str:
+    """실제 등락률에서 상승/하락/중립 방향을 계산한다."""
+
+    if change_pct is not None and change_pct <= -0.5:
+        return "down"
+    if change_pct is not None and change_pct >= 0.5:
+        return "up"
+    return "neutral"
+
+
+def _direction_word(direction: str) -> str:
+    if direction == "up":
+        return "상승"
+    if direction == "down":
+        return "하락"
+    return "보합"
+
+
+def _topic_subject(name: str) -> str:
+    """회사명에 자연스러운 주제 조사(은/는)를 붙인다."""
+
+    if not name:
+        return "해당 종목은"
+    last = name[-1]
+    code = ord(last)
+    if 0xAC00 <= code <= 0xD7A3:
+        has_jong = (code - 0xAC00) % 28 != 0
+        return f"{name}{'은' if has_jong else '는'}"
+    return f"{name}은"
+
+
+def _tool_context(price: dict, news_items: list[dict], direction_notice: str | None = None) -> str:
     """Solar에 넘길 근거 데이터(시세·뉴스)를 텍스트로 정리한다."""
     lines: list[str] = []
+    if direction_notice:
+        lines.append(f"방향 보정 안내: {direction_notice}")
     name = price.get("name") or "해당 종목"
     change_pct = price.get("change_pct")
     current_price = price.get("current_price")
@@ -485,14 +541,23 @@ def _format_disclosure_answer(ticker: str | None, disclosures: list[dict]) -> st
     return "\n".join(lines)
 
 
-def _fallback_answer(price: dict, news_items: list[dict], docs: list[str]) -> str:
+def _fallback_answer(
+    price: dict,
+    news_items: list[dict],
+    docs: list[str],
+    direction_notice: str | None = None,
+) -> str:
     """Solar 호출 실패 시 사용하는 템플릿 응답."""
     change_pct = price.get("change_pct")
     if change_pct is not None:
         name = price.get("name") or "해당 종목"
         current_price = price.get("current_price")
         arrow, direction = _format_change(change_pct)
-        lines = [f"{name} {arrow} {abs(change_pct):.2f}% {direction}"]
+        lines = []
+        if direction_notice:
+            lines.append(direction_notice)
+            lines.append("")
+        lines.append(f"{name} {arrow} {abs(change_pct):.2f}% {direction}")
         if current_price is not None:
             lines.append(f"현재가 {int(current_price):,}원")
         lines.append("")
@@ -513,7 +578,8 @@ def _fallback_answer(price: dict, news_items: list[dict], docs: list[str]) -> st
         lines.append("※ 투자 자문이 아닌 참고용 정보입니다.")
         return "\n".join(lines)
     if docs:
-        return "\n".join(docs) + "\n\n※ 투자 자문이 아닌 참고용 정보입니다."
+        prefix = f"{direction_notice}\n\n" if direction_notice else ""
+        return prefix + "\n".join(docs) + "\n\n※ 투자 자문이 아닌 참고용 정보입니다."
     return "관련 정보를 찾지 못했어요. 질문을 조금 더 구체적으로 알려주세요."
 
 
@@ -606,6 +672,7 @@ async def response_node(state: StockPilotState) -> dict:
     price = state.get("price_data") or {}
     news_items = state.get("news_items") or []
     docs = state.get("retrieved_docs") or []
+    direction_notice = state.get("direction_notice")
     user_text = _last_user_text(state)
     intent = state.get("intent")
 
@@ -628,11 +695,19 @@ async def response_node(state: StockPilotState) -> dict:
         if docs:
             system += RAG_GROUNDING.format(context="\n\n".join(docs))
         if price or news_items:
-            system += TOOL_GROUNDING.format(tool_result=_tool_context(price, news_items))
+            system += TOOL_GROUNDING.format(
+                tool_result=_tool_context(price, news_items, direction_notice)
+            )
             system += (
                 "\n\n중요: 상승/하락 방향은 반드시 위 '등락률'의 부호를 그대로 따르라. "
                 "뉴스 내용이 반대로 보여도 실제 등락률 부호(+ 상승 / - 하락)를 기준으로 설명하라."
             )
+            if direction_notice:
+                system += (
+                    "\n질문에 포함된 상승/하락 방향과 실제 등락률이 충돌했다. "
+                    "답변 첫 문장에 반드시 '방향 보정 안내'의 내용을 자연스럽게 먼저 말한 뒤, "
+                    "실제 등락률 방향에 맞는 원인을 설명하라."
+                )
 
     requested_model = state.get("model")
     used_model = requested_model or "solar"
@@ -654,11 +729,14 @@ async def response_node(state: StockPilotState) -> dict:
             )
         answer = (response.content or "").strip()
         if not answer:
-            answer = _fallback_answer(price, news_items, docs)
+            answer = _fallback_answer(price, news_items, docs, direction_notice)
     except Exception as exc:
         logger.warning(f"LLM 응답 실패, 템플릿으로 폴백: {type(exc).__name__}: {exc}")
-        answer = _fallback_answer(price, news_items, docs)
+        answer = _fallback_answer(price, news_items, docs, direction_notice)
         used_model = "template-fallback"
+
+    if direction_notice and direction_notice not in answer:
+        answer = f"{direction_notice}\n\n{answer}"
 
     answer = sanitize_llm_output(answer)
 
