@@ -109,7 +109,7 @@ _CODE_NAME: dict[str, str] = {}
 _INDEX_LOCK = threading.Lock()
 _SENSITIVE_STDIO_LOCK = threading.Lock()
 _SNAPSHOT_CACHE_LOCK = threading.Lock()
-_SNAPSHOT_CACHE_TTL_SECONDS = 180
+_SNAPSHOT_CACHE_TTL_SECONDS = 1800
 _SNAPSHOT_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
 
 

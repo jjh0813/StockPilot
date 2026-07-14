@@ -125,19 +125,20 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
             const tr = e.tool_result || {}
             const news = Array.isArray(tr.news) ? tr.news.filter((n) => n && n.url) : []
             const disclosures = Array.isArray(tr.disclosures) ? tr.disclosures : []
+            const shouldUpdatePanel = tr.panel_update !== false
             patchLastAssistant({
               price: tr.price || null,
               sources: news,
               status: 'streaming',
             })
-            if (Array.isArray(tr.stocks) && tr.stocks.length) {
+            if (shouldUpdatePanel && Array.isArray(tr.stocks) && tr.stocks.length) {
               // 급등 스크리너: 종목별 차트·뉴스·공시를 순서대로 가운데에 쌓는다.
               tr.stocks.forEach((s) => {
                 if (!s || !s.price) return
                 const sNews = Array.isArray(s.news) ? s.news.filter((n) => n && n.url) : []
                 onInsight?.({ price: s.price, news: sNews, disclosures: s.disclosures || [] })
               })
-            } else if (tr.price) {
+            } else if (shouldUpdatePanel && tr.price) {
               onInsight?.({ price: tr.price, news, disclosures })
             }
           } else if (e.type === 'token') {

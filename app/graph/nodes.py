@@ -1,5 +1,6 @@
 """그래프 노드 — router / rag / tool / response."""
 import asyncio
+from copy import deepcopy
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,7 @@ _executor = ToolExecutor()
 
 # 세션별 직전 분석 종목 (후속 질문 문맥 유지용)
 _SESSION_TICKER: dict[str, str] = {}
+_SESSION_PRICE_SNAPSHOT: dict[tuple[str, str], dict] = {}
 
 OUT_OF_SCOPE_MESSAGE = (
     "저는 주식 리서치 전용 도우미라 주식·종목·뉴스·공시·재무·투자용어와 "
@@ -146,6 +148,36 @@ def _clean_ticker(text: str) -> str:
     return cleaned or text.strip()
 
 
+def _session_price_key(session_id: str, price_or_ticker: dict | str | None) -> tuple[str, str] | None:
+    if not price_or_ticker:
+        return None
+    if isinstance(price_or_ticker, dict):
+        ticker = price_or_ticker.get("ticker") or price_or_ticker.get("name")
+    else:
+        ticker = price_or_ticker
+    ticker = str(ticker or "").strip()
+    if not ticker:
+        return None
+    return session_id, ticker
+
+
+def _remember_session_price(session_id: str, price_data: dict | None) -> None:
+    key = _session_price_key(session_id, price_data)
+    if key and price_data:
+        _SESSION_PRICE_SNAPSHOT[key] = deepcopy(price_data)
+        name = price_data.get("name")
+        if name:
+            _SESSION_PRICE_SNAPSHOT[(session_id, str(name))] = deepcopy(price_data)
+
+
+def _get_session_price(session_id: str, ticker: str) -> dict | None:
+    key = _session_price_key(session_id, ticker)
+    if not key:
+        return None
+    cached = _SESSION_PRICE_SNAPSHOT.get(key)
+    return deepcopy(cached) if cached else None
+
+
 def _has_investment_domain(text: str) -> bool:
     lower = text.lower()
     return any(hint in lower for hint in INVESTMENT_DOMAIN_HINTS)
@@ -254,6 +286,7 @@ async def router_node(state: StockPilotState) -> dict:
     wants_disclosure = any(hint in lower for hint in DISCLOSURE_HINTS)
     wants_cause = _is_cause_question(text)
     is_domain_query = _has_investment_domain(text)
+    is_followup = False
 
     if matched_stock:
         _SESSION_TICKER[session_id] = matched_stock  # 문맥 저장
@@ -289,7 +322,7 @@ async def router_node(state: StockPilotState) -> dict:
             # LLM 라우터는 애매한 투자/뉴스 질문에만 보조적으로 사용해 지연과 비용을 줄인다.
             if _is_screener_query(text, wants_definition=wants_definition):
                 logger.info("🔀 [Router] intent=tool (rule screener)")
-                return {"intent": "tool", "screen": True, "ticker": None}
+                return {"intent": "tool", "screen": True, "ticker": None, "is_followup": False}
 
             if _should_ask_llm_router(text):
                 logger.info("🔀 [Router] asking LLM router")
@@ -299,19 +332,20 @@ async def router_node(state: StockPilotState) -> dict:
                         route["screen"] or _is_screener_query(text, wants_definition=wants_definition)
                     ):
                         logger.info("🔀 [Router] intent=tool (llm screener)")
-                        return {"intent": "tool", "screen": True, "ticker": None}
+                        return {"intent": "tool", "screen": True, "ticker": None, "is_followup": False}
                     if route["intent"] == "rag":
                         return {
                             "intent": "rag",
                             "screen": False,
                             "ticker": _clean_ticker(text),
                             "tool_mode": None,
+                            "is_followup": False,
                         }
                     if route["intent"] == "chat" and not _is_screener_query(
                         text,
                         wants_definition=wants_definition,
                     ):
-                        return {"intent": "chat", "screen": False, "ticker": None}
+                        return {"intent": "chat", "screen": False, "ticker": None, "is_followup": False}
 
             # KNOWN_STOCKS 밖의 상장 종목도 인식: 이름이 코드로 해석되면 시세 분석(tool)으로 처리
             cand = _clean_ticker(text)
@@ -324,13 +358,25 @@ async def router_node(state: StockPilotState) -> dict:
                     _SESSION_TICKER[session_id] = code
                     mode = "disclosure" if (wants_disclosure and not wants_definition) else "market"
                     logger.info(f"🔀 [Router] intent=tool (resolved listed stock: {cand})")
-                    return {"intent": "tool", "screen": False, "ticker": code, "tool_mode": mode}
+                    return {
+                        "intent": "tool",
+                        "screen": False,
+                        "ticker": code,
+                        "tool_mode": mode,
+                        "is_followup": False,
+                    }
 
             logger.info("🔀 [Router] intent=chat (out-of-scope)")
-            return {"intent": "chat", "screen": False, "ticker": None}
+            return {"intent": "chat", "screen": False, "ticker": None, "is_followup": False}
 
     logger.info(f"🔀 [Router] intent={intent}, ticker={ticker}, tool_mode={tool_mode}")
-    return {"intent": intent, "screen": False, "ticker": ticker, "tool_mode": tool_mode}
+    return {
+        "intent": intent,
+        "screen": False,
+        "ticker": ticker,
+        "tool_mode": tool_mode,
+        "is_followup": is_followup,
+    }
 
 
 async def rag_node(state: StockPilotState) -> dict:
@@ -383,7 +429,15 @@ async def tool_node(state: StockPilotState) -> dict:
             "tool_mode": "disclosure",
         }
 
-    price = await _executor.execute("get_stock_price", {"ticker": ticker})
+    session_id = state.get("session_id") or "default"
+    is_followup = bool(state.get("is_followup"))
+    cached_price = _get_session_price(session_id, ticker) if is_followup else None
+    if cached_price:
+        logger.info(f"🔧 [Tool] 세션 고정 시세 재사용: session={session_id}, ticker={ticker}")
+        price = {"success": True, "data": cached_price}
+    else:
+        price = await _executor.execute("get_stock_price", {"ticker": ticker})
+        _remember_session_price(session_id, price.get("data"))
     user_text = _last_user_text(state)
     change_pct = (price.get("data") or {}).get("change_pct")
     requested_direction = _requested_direction_from_text(user_text)
@@ -405,7 +459,7 @@ async def tool_node(state: StockPilotState) -> dict:
             f"requested={requested_direction}, actual={actual_direction}"
         )
     else:
-        direction = requested_direction or actual_direction
+        direction = requested_direction if requested_direction in {"up", "down"} else actual_direction
     disclosure_query = (price.get("data") or {}).get("ticker") or ticker
     news_task = asyncio.create_task(
         _executor.execute("get_news", {"company": ticker, "direction": direction})
@@ -432,11 +486,15 @@ async def tool_node(state: StockPilotState) -> dict:
         "news_items": news_items,
         "disclosures": disclosures,
         "direction_notice": direction_notice,
+        "is_followup": is_followup,
+        "panel_update": not is_followup,
         "tool_result": {
             "price": price.get("data"),
             "news": news_items,
             "disclosures": disclosures,
             "direction_notice": direction_notice,
+            "is_followup": is_followup,
+            "panel_update": not is_followup,
         },
         "tool_name": "get_stock_price,get_news,get_disclosure",
         "tool_mode": "market",

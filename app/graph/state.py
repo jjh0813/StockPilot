@@ -28,6 +28,8 @@ class StockPilotState(TypedDict, total=False):
     news_items: list[dict[str, Any]]
     disclosures: list[dict[str, Any]]   # 최근 공시 목록 (4번째 도구)
     direction_notice: Optional[str]      # 질문 방향과 실제 등락 방향이 다를 때 사용자 안내
+    is_followup: Optional[bool]          # 직전 종목 문맥을 이어받은 질문인지 여부
+    panel_update: Optional[bool]         # 프론트 인사이트 패널을 새로 갱신할지 여부
     screen: Optional[bool]              # 급등·급락 스크리너 모드
     screener_results: Optional[Any]     # 스크리너 결과 목록
     screener_panels: Optional[Any]      # 스크리너 상위 종목별 패널(시세·뉴스·공시)

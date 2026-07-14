@@ -101,6 +101,8 @@ def _tool_payload(node_output: dict) -> dict:
         node_output.get("news_items") or [],
         node_output.get("disclosures") or [],
     )
+    payload["panel_update"] = node_output.get("panel_update", True)
+    payload["is_followup"] = bool(node_output.get("is_followup"))
     if node_output.get("direction_notice"):
         payload["direction_notice"] = node_output["direction_notice"]
     # 급등 스크리너: 상위 종목별 패널을 순서대로 함께 내보낸다(가운데 스택용).

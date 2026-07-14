@@ -1,7 +1,14 @@
 """에이전트/그래프 단위 테스트 (네트워크·API 키 불필요)."""
 from langchain_core.messages import HumanMessage
 from app.graph.edges import route_by_intent
-from app.graph.nodes import OUT_OF_SCOPE_MESSAGE, _format_change, response_node, router_node, tool_node
+from app.graph.nodes import (
+    OUT_OF_SCOPE_MESSAGE,
+    _SESSION_PRICE_SNAPSHOT,
+    _format_change,
+    response_node,
+    router_node,
+    tool_node,
+)
 from app.graph.state import create_initial_state
 from app.tools.executor import _normalize_news_item
 from tests.fixtures.tool_responses import directional_news_item, stock_snapshot
@@ -146,6 +153,7 @@ async def test_router_node_followup_cause_reuses_previous_ticker():
     assert result["intent"] == "tool"
     assert result["ticker"] == "삼성전자"
     assert result["tool_mode"] == "market"
+    assert result["is_followup"] is True
 
 
 async def test_router_node_business_report_risk_uses_rag_not_disclosure():
@@ -275,6 +283,53 @@ async def test_response_node_overview_keeps_header_but_avoids_reason_analysis():
     assert "왜 올랐어?" in content
     assert "왜 떨어졌어?" not in content
     assert "원인 분석" not in content
+
+
+async def test_tool_node_reuses_session_price_for_followup(monkeypatch):
+    _SESSION_PRICE_SNAPSHOT.clear()
+    calls = {"price": 0}
+
+    async def fake_execute(tool_name, tool_args=None, session_id="default"):
+        if tool_name == "get_stock_price":
+            calls["price"] += 1
+            return {
+                "success": True,
+                "data": {
+                    **stock_snapshot(),
+                    "name": "삼성전자",
+                    "current_price": 263500,
+                    "change_pct": 3.54,
+                    "snapshot_at": "2026-07-14T06:07:00+00:00",
+                },
+            }
+        if tool_name == "get_news":
+            assert tool_args["direction"] == "up"
+            return {"success": True, "data": {"news": [directional_news_item()]}}
+        if tool_name == "get_disclosure":
+            return {"success": True, "data": {"disclosures": []}}
+        raise AssertionError(f"unexpected tool: {tool_name}")
+
+    monkeypatch.setattr("app.graph.nodes._executor.execute", fake_execute)
+
+    first = create_initial_state("price-pin")
+    first["ticker"] = "삼성전자"
+    first["messages"] = [HumanMessage(content="삼성전자 요즘 어때?")]
+    first_result = await tool_node(first)
+
+    followup = create_initial_state("price-pin")
+    followup["ticker"] = "삼성전자"
+    followup["is_followup"] = True
+    followup["messages"] = [HumanMessage(content="왜 내렸어?")]
+    second_result = await tool_node(followup)
+
+    assert calls["price"] == 1
+    assert first_result["price_data"]["current_price"] == 263500
+    assert second_result["price_data"]["current_price"] == 263500
+    assert second_result["price_data"]["change_pct"] == 3.54
+    assert second_result["panel_update"] is False
+    assert second_result["tool_result"]["panel_update"] is False
+    assert "현재 삼성전자는 상승 중입니다" in second_result["direction_notice"]
+    _SESSION_PRICE_SNAPSHOT.clear()
 
 
 async def test_tool_node_corrects_requested_down_when_actual_price_is_up(monkeypatch):
