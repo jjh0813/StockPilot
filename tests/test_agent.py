@@ -281,7 +281,7 @@ async def test_tool_node_corrects_requested_down_when_actual_price_is_up(monkeyp
 
     news_call = next(args for name, args in calls if name == "get_news")
     assert news_call["direction"] == "up"
-    assert "하락 원인 대신 최근 상승" in result["direction_notice"]
+    assert "현재 삼성전자는 상승 중입니다" in result["direction_notice"]
     assert result["tool_result"]["direction_notice"] == result["direction_notice"]
 
 
@@ -311,7 +311,7 @@ async def test_tool_node_corrects_requested_up_when_actual_price_is_down(monkeyp
 
     result = await tool_node(state)
 
-    assert "상승 원인 대신 최근 하락" in result["direction_notice"]
+    assert "현재 삼성전자는 하락 중입니다" in result["direction_notice"]
 
 
 async def test_tool_node_uses_direction_after_why_for_conflicting_user_wording(monkeypatch):
@@ -340,7 +340,7 @@ async def test_tool_node_uses_direction_after_why_for_conflicting_user_wording(m
 
     result = await tool_node(state)
 
-    assert "상승 원인 대신 최근 하락" in result["direction_notice"]
+    assert "현재 삼성전자는 하락 중입니다" in result["direction_notice"]
 
 
 async def test_tool_node_corrects_falling_premise_when_actual_price_is_up(monkeypatch):
@@ -377,7 +377,7 @@ async def test_tool_node_corrects_falling_premise_when_actual_price_is_up(monkey
 
     result = await tool_node(state)
 
-    assert "하락 원인 대신 최근 상승" in result["direction_notice"]
+    assert "현재 삼성전자는 상승 중입니다" in result["direction_notice"]
 
 
 async def test_response_node_prepends_direction_notice_when_llm_omits_it(monkeypatch):
@@ -392,7 +392,7 @@ async def test_response_node_prepends_direction_notice_when_llm_omits_it(monkeyp
 
     monkeypatch.setattr("app.graph.nodes.ainvoke_with_fallback", fake_ainvoke)
 
-    notice = "현재 삼성전자는 상승 중이라, 요청하신 하락 원인 대신 최근 상승과 관련 있어 보이는 뉴스를 기준으로 정리합니다."
+    notice = "아닙니다. 현재 삼성전자는 상승 중입니다. 아래는 최근 상승과 관련 있어 보이는 주요 이유입니다."
     state = create_initial_state("direction-notice-response")
     state["ticker"] = "삼성전자"
     state["price_data"] = {**stock_snapshot(), "change_pct": 1.77}
@@ -403,12 +403,12 @@ async def test_response_node_prepends_direction_notice_when_llm_omits_it(monkeyp
     result = await response_node(state)
     content = result["messages"][-1].content
 
-    assert content.startswith(f"방향 보정 안내: {notice}")
+    assert content.startswith(notice)
     assert "투자 자문이 아닌" in content
 
 
 async def test_response_node_moves_direction_notice_before_stale_prefix(monkeypatch):
-    notice = "현재 삼성전자는 상승 중이라, 요청하신 하락 원인 대신 최근 상승과 관련 있어 보이는 뉴스를 기준으로 정리합니다."
+    notice = "아닙니다. 현재 삼성전자는 상승 중입니다. 아래는 최근 상승과 관련 있어 보이는 주요 이유입니다."
 
     class FakeResult:
         message = type(
@@ -441,6 +441,6 @@ async def test_response_node_moves_direction_notice_before_stale_prefix(monkeypa
     result = await response_node(state)
     content = result["messages"][-1].content
 
-    assert content.startswith(f"방향 보정 안내: {notice}")
+    assert content.startswith(notice)
     assert "삼성전자 ▼ 2.30% 하락" not in content
     assert "삼성전자 ▲ 1.77% 상승" in content

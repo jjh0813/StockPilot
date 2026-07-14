@@ -369,9 +369,8 @@ async def tool_node(state: StockPilotState) -> dict:
         direction = actual_direction
         name = (price.get("data") or {}).get("name") or ticker or "해당 종목"
         direction_notice = (
-            f"현재 {_topic_subject(name)} {_direction_word(actual_direction)} 중이라, "
-            f"요청하신 {_direction_word(requested_direction)} 원인 대신 최근 "
-            f"{_direction_word(actual_direction)}과 관련 있어 보이는 뉴스를 기준으로 정리합니다."
+            f"아닙니다. 현재 {_topic_subject(name)} {_direction_word(actual_direction)} 중입니다. "
+            f"아래는 최근 {_direction_word(actual_direction)}과 관련 있어 보이는 주요 이유입니다."
         )
         logger.info(
             "🔁 [Tool] 질문 방향과 실제 등락 방향 불일치: "
@@ -763,7 +762,7 @@ async def response_node(state: StockPilotState) -> dict:
             if direction_notice:
                 system += (
                     "\n질문에 포함된 상승/하락 방향과 실제 등락률이 충돌했다. "
-                    "답변 첫 문장에 반드시 '방향 보정 안내'의 내용을 자연스럽게 먼저 말한 뒤, "
+                    "답변 첫 문장에 반드시 실제 등락 방향을 정정하는 문장을 자연스럽게 먼저 말한 뒤, "
                     "실제 등락률 방향에 맞는 원인을 설명하라."
                 )
 
@@ -805,7 +804,7 @@ async def response_node(state: StockPilotState) -> dict:
 def _force_direction_notice_first(answer: str, direction_notice: str) -> str:
     """방향 보정이 필요한 답변은 보정 안내가 반드시 첫 문장이 되도록 정리한다."""
 
-    prefix = f"방향 보정 안내: {direction_notice}"
+    prefix = direction_notice
     cleaned = (answer or "").strip()
     if not cleaned:
         return prefix
