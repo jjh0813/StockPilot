@@ -63,6 +63,9 @@ async def test_positive_news_screener_reuses_short_cache(monkeypatch):
 
     calls = 0
 
+    async def fake_change_pct(company: str):
+        return {"삼성전자": 1.2, "SK하이닉스": 0.8}[company]
+
     async def fake_issue_news(company: str, **kwargs):
         nonlocal calls
         calls += 1
@@ -81,6 +84,7 @@ async def test_positive_news_screener_reuses_short_cache(monkeypatch):
         )
         return [item]
 
+    monkeypatch.setattr(price, "get_change_pct", fake_change_pct)
     monkeypatch.setattr(news, "get_stock_issue_news", fake_issue_news)
 
     executor = ToolExecutor()
