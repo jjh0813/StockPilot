@@ -57,6 +57,62 @@ async def test_router_node_tool():
     assert result["ticker"] == "삼성전자"
 
 
+async def test_router_node_positive_news_screener_variants(monkeypatch):
+    routed_queries = []
+
+    async def fake_llm_route(query: str):
+        routed_queries.append(query)
+        return {"intent": "tool", "screen": True, "tool_mode": "market"}
+
+    monkeypatch.setattr("app.graph.nodes._llm_route_query", fake_llm_route)
+
+    for question in (
+        "최근 급등한 종목 알려줘",
+        "호재 있는 종목 알려줘",
+        "좋은 뉴스 나온 종목 알려줘",
+    ):
+        state = create_initial_state(f"screener-{question}")
+        state["messages"] = [HumanMessage(content=question)]
+
+        result = await router_node(state)
+
+        assert result["intent"] == "tool"
+        assert result["screen"] is True
+        assert result["ticker"] is None
+
+    assert routed_queries == [
+        "최근 급등한 종목 알려줘",
+        "호재 있는 종목 알려줘",
+        "좋은 뉴스 나온 종목 알려줘",
+    ]
+
+
+async def test_router_node_screener_rule_fallback_when_llm_router_fails(monkeypatch):
+    async def fake_llm_route(query: str):
+        return None
+
+    monkeypatch.setattr("app.graph.nodes._llm_route_query", fake_llm_route)
+
+    state = create_initial_state("screener-rule-fallback")
+    state["messages"] = [HumanMessage(content="호재 있는 종목 알려줘")]
+
+    result = await router_node(state)
+
+    assert result["intent"] == "tool"
+    assert result["screen"] is True
+    assert result["ticker"] is None
+
+
+async def test_router_node_positive_news_definition_is_rag_not_screener():
+    state = create_initial_state("positive-news-definition")
+    state["messages"] = [HumanMessage(content="호재가 뭐야?")]
+
+    result = await router_node(state)
+
+    assert result["intent"] == "rag"
+    assert result["screen"] is False
+
+
 async def test_router_node_disclosure_tool_mode():
     state = create_initial_state("disclosure-router")
     state["messages"] = [HumanMessage(content="삼성전자 공시 알려줘")]

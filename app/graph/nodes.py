@@ -1,5 +1,7 @@
 """그래프 노드 — router / rag / tool / response."""
 import asyncio
+import json
+import re
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
@@ -7,7 +9,13 @@ from loguru import logger
 from app.core.guardrails import sanitize_llm_output
 from app.core.llm import ainvoke_with_fallback
 from app.core.market_time import tag_session
-from app.core.prompts import RAG_GROUNDING, RAG_RESPONSE_PROMPT, RESPONSE_PROMPT, TOOL_GROUNDING
+from app.core.prompts import (
+    RAG_GROUNDING,
+    RAG_RESPONSE_PROMPT,
+    RESPONSE_PROMPT,
+    ROUTER_PROMPT,
+    TOOL_GROUNDING,
+)
 from app.graph.state import StockPilotState
 from app.repositories.glossary import extract_term_from_query, search_or_research_terms
 from app.repositories.rag import search_documents
@@ -56,8 +64,22 @@ INVESTMENT_DOMAIN_HINTS = (
 # 급등·급락 스크리너 힌트 (특정 종목 없이 "요즘 뜨는 종목" 류)
 SCREENER_HINTS = (
     "급등", "급락", "뜨는", "오르는", "상승한 종목", "하락한 종목",
-    "많이 오른", "많이 내린", "핫한",
+    "많이 오른", "많이 내린", "핫한", "급등주", "급락주",
+    "호재 있는", "호재가 있는", "호재 나온", "호재 종목",
+    "좋은 뉴스", "긍정 뉴스", "긍정적인 뉴스", "뉴스 나온 종목", "좋은 소식",
 )
+
+SCREENER_TARGET_HINTS = (
+    "종목", "주식", "기업", "회사", "어디", "뭐", "알려", "찾아", "보여",
+)
+
+POSITIVE_NEWS_HINTS = (
+    "호재", "좋은 뉴스", "긍정 뉴스", "긍정적인 뉴스", "좋은 소식", "좋은 흐름", "수혜",
+)
+
+ROUTER_LLM_DOMAIN_HINTS = INVESTMENT_DOMAIN_HINTS + SCREENER_HINTS + POSITIVE_NEWS_HINTS
+
+_ROUTER_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 # 후속 질문 힌트 (종목명 없이 직전 종목을 이어 묻는 경우)
 FOLLOWUP_HINTS = (
@@ -123,6 +145,82 @@ def _has_investment_domain(text: str) -> bool:
     return any(hint in lower for hint in INVESTMENT_DOMAIN_HINTS)
 
 
+def _should_ask_llm_router(text: str) -> bool:
+    """LLM 라우터 호출이 의미 있는 투자/뉴스/종목 후보 질문인지 판별한다."""
+
+    lower = text.lower()
+    return any(hint in lower for hint in ROUTER_LLM_DOMAIN_HINTS)
+
+
+def _is_screener_query(text: str, *, wants_definition: bool) -> bool:
+    """특정 종목 없이 '요즘 뜨는/호재 있는 종목'을 찾는 질문인지 판별한다."""
+
+    if wants_definition:
+        return False
+
+    if any(hint in text for hint in SCREENER_HINTS):
+        return True
+
+    # "호재가 뭐야?" 같은 용어 질문은 위에서 걸렀고, 여기서는
+    # "호재 있는 종목/기업 찾아줘"처럼 탐색 대상이 있는 경우만 스크리너로 보낸다.
+    has_positive_news = any(hint in text for hint in POSITIVE_NEWS_HINTS)
+    has_target = any(hint in text for hint in SCREENER_TARGET_HINTS)
+    return has_positive_news and has_target
+
+
+def _parse_router_json(content: str) -> dict | None:
+    """Solar 라우터의 JSON 응답을 안전하게 파싱한다."""
+
+    match = _ROUTER_JSON_RE.search(content or "")
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+
+    intent = parsed.get("intent")
+    if intent not in {"tool", "rag", "chat"}:
+        return None
+
+    tool_mode = parsed.get("tool_mode")
+    if tool_mode not in {"market", "disclosure", None}:
+        tool_mode = None
+
+    return {
+        "intent": intent,
+        "screen": bool(parsed.get("screen")),
+        "tool_mode": tool_mode,
+    }
+
+
+async def _llm_route_query(text: str) -> dict | None:
+    """Solar에게 애매한 질문의 라우팅을 맡긴다. 실패하면 None으로 조용히 fallback."""
+
+    try:
+        result = await ainvoke_with_fallback(
+            [
+                SystemMessage(content=ROUTER_PROMPT),
+                HumanMessage(content=text),
+            ],
+            model_id="solar",
+            timeout_seconds=8,
+        )
+    except Exception as exc:
+        logger.warning(f"LLM router failed; rule fallback used: {type(exc).__name__}: {exc}")
+        return None
+
+    route = _parse_router_json(result.message.content)
+    if route:
+        logger.info(
+            "🔀 [Router:LLM] "
+            f"intent={route['intent']}, screen={route['screen']}, tool_mode={route['tool_mode']}"
+        )
+    else:
+        logger.warning("LLM router returned unparsable output; rule fallback used")
+    return route
+
+
 async def router_node(state: StockPilotState) -> dict:
     """사용자 의도를 분류하고 대상 종목을 추출한다."""
     text = _last_user_text(state)
@@ -138,15 +236,11 @@ async def router_node(state: StockPilotState) -> dict:
         None,
     )
 
-    # 특정 종목이 없고 스크리너 힌트가 있으면 급등·급락 스크리너
-    if matched_stock is None and any(h in text for h in SCREENER_HINTS):
-        logger.info("🔀 [Router] intent=tool (screener)")
-        return {"intent": "tool", "screen": True, "ticker": None}
-
     is_rag = any(hint in lower for hint in RAG_HINTS)
     wants_definition = any(hint in lower for hint in DEFINITION_HINTS)
     wants_disclosure = any(hint in lower for hint in DISCLOSURE_HINTS)
     is_domain_query = _has_investment_domain(text)
+
     if matched_stock:
         _SESSION_TICKER[session_id] = matched_stock  # 문맥 저장
         ticker = matched_stock
@@ -177,6 +271,33 @@ async def router_node(state: StockPilotState) -> dict:
                 intent = "rag" if is_rag else "tool"
                 tool_mode = "market" if intent == "tool" else None
         else:
+            if _should_ask_llm_router(text):
+                logger.info("🔀 [Router] asking LLM router")
+                route = await _llm_route_query(text)
+                if route:
+                    if route["intent"] == "tool" and (
+                        route["screen"] or _is_screener_query(text, wants_definition=wants_definition)
+                    ):
+                        logger.info("🔀 [Router] intent=tool (llm screener)")
+                        return {"intent": "tool", "screen": True, "ticker": None}
+                    if route["intent"] == "rag":
+                        return {
+                            "intent": "rag",
+                            "screen": False,
+                            "ticker": _clean_ticker(text),
+                            "tool_mode": None,
+                        }
+                    if route["intent"] == "chat" and not _is_screener_query(
+                        text,
+                        wants_definition=wants_definition,
+                    ):
+                        return {"intent": "chat", "screen": False, "ticker": None}
+
+            # LLM이 실패하거나 보수적으로 chat을 냈더라도, 명확한 스크리너 표현이면 룰로 복구한다.
+            if _is_screener_query(text, wants_definition=wants_definition):
+                logger.info("🔀 [Router] intent=tool (rule screener fallback)")
+                return {"intent": "tool", "screen": True, "ticker": None}
+
             logger.info("🔀 [Router] intent=chat (out-of-scope)")
             return {"intent": "chat", "screen": False, "ticker": None}
 
@@ -234,9 +355,9 @@ async def tool_node(state: StockPilotState) -> dict:
     price = await _executor.execute("get_stock_price", {"ticker": ticker})
     user_text = _last_user_text(state)
     change_pct = (price.get("data") or {}).get("change_pct")
-    if any(keyword in user_text for keyword in ("떨어", "하락", "급락", "약세")):
+    if any(keyword in user_text for keyword in ("떨어", "하락", "급락", "약세", "악재", "나쁜 뉴스", "부정 뉴스")):
         direction = "down"
-    elif any(keyword in user_text for keyword in ("올라", "상승", "급등", "강세")):
+    elif any(keyword in user_text for keyword in ("올라", "상승", "급등", "강세", "호재", "좋은 뉴스", "긍정 뉴스")):
         direction = "up"
     elif change_pct is not None and change_pct <= -0.5:
         direction = "down"
