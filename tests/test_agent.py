@@ -258,6 +258,8 @@ async def test_response_node_overview_keeps_header_but_avoids_reason_analysis():
     assert "기준일" in content
     assert "조회시각" in content
     assert "전 거래일 대비" in content
+    assert "왜 올랐어?" in content
+    assert "왜 떨어졌어?" not in content
     assert "원인 분석" not in content
 
 

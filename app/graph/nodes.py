@@ -575,9 +575,25 @@ def _market_overview_answer(price: dict) -> str:
     if trend_pct is not None:
         lines.append(f"최근 흐름 변화폭: {trend_pct:+.2f}%")
 
+    if change_pct is not None and change_pct > 0:
+        followup = (
+            "이 움직임의 배경이 궁금하시다면 “왜 올랐어?”라고 물어보시면 "
+            "뉴스와 공시 근거로 더 자세히 설명해드릴게요."
+        )
+    elif change_pct is not None and change_pct < 0:
+        followup = (
+            "이 움직임의 배경이 궁금하시다면 “왜 떨어졌어?”라고 물어보시면 "
+            "뉴스와 공시 근거로 더 자세히 설명해드릴게요."
+        )
+    else:
+        followup = (
+            "이 움직임의 배경이 궁금하시다면 “왜 움직임이 크지 않아?”처럼 물어보시면 "
+            "뉴스와 공시 근거로 더 자세히 설명해드릴게요."
+        )
+
     lines += [
         "",
-        "이 움직임의 배경이 궁금하면 “왜 올랐어?” 또는 “왜 떨어졌어?”처럼 물어보면 뉴스와 공시 근거로 더 자세히 설명해드릴게요.",
+        followup,
         "",
         "※ 투자 자문이 아닌 참고 정보입니다.",
     ]
