@@ -153,6 +153,7 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
     streamed_token = False
     answer_text = ""
     used_model = None
+    suppress_response_tokens = False
     try:
         async for mode, chunk in graph.astream(
             _build_state(request),
@@ -168,6 +169,10 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
                 ):
                     text = message_chunk.content or ""
                     if text:
+                        if suppress_response_tokens:
+                            # 방향 보정 같은 후처리 필수 케이스에서는 LLM 원시 토큰이
+                            # 잘못된 전제를 먼저 보여줄 수 있으므로 최종 정제 응답만 보낸다.
+                            continue
                         streamed_token = True
                         answer_text += text
                         yield StreamEvent(
@@ -188,6 +193,8 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
                     ).to_sse()
                 if node_name == "tool":
                     tool_used = node_output.get("tool_name")
+                    if node_output.get("direction_notice"):
+                        suppress_response_tokens = True
                     yield StreamEvent(
                         type="tool",
                         node="tool",

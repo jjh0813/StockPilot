@@ -2,6 +2,7 @@
 import json
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage, AIMessageChunk
 import app.graph.nodes as nodes
 from app.main import app
 from tests.fixtures.tool_responses import disclosure_item, directional_news_item, stock_snapshot
@@ -131,6 +132,63 @@ def test_chat_stream_blocks_buy_sell_advice_request():
     assert "매수·매도 여부는 추천할 수 없습니다" in events[0]["error"]
     assert all(event["type"] != "tool" for event in events)
     assert events[-1]["type"] == "done"
+
+
+def test_chat_stream_suppresses_raw_tokens_when_direction_notice_exists(monkeypatch):
+    notice = "아닙니다. 현재 삼성전자는 상승 중입니다. 아래는 최근 상승과 관련 있어 보이는 주요 이유입니다."
+
+    class _DirectionNoticeGraph:
+        async def astream(self, *args, **kwargs):
+            yield (
+                "updates",
+                {
+                    "tool": {
+                        "tool_name": "get_stock_price,get_news,get_disclosure",
+                        "direction_notice": notice,
+                        "tool_result": {
+                            "price": {"name": "삼성전자", "change_pct": 1.2},
+                            "news": [],
+                            "disclosures": [],
+                            "direction_notice": notice,
+                        },
+                    }
+                },
+            )
+            yield (
+                "messages",
+                (
+                    AIMessageChunk(content="삼성전자 ▼ 0.20% 하락"),
+                    {"langgraph_node": "response"},
+                ),
+            )
+            yield (
+                "updates",
+                {
+                    "response": {
+                        "messages": [
+                            AIMessage(content=f"{notice}\n\n삼성전자 ▲ 1.20% 상승")
+                        ],
+                        "used_model": "solar",
+                    }
+                },
+            )
+
+    monkeypatch.setattr(
+        "app.api.routes.chat.get_stockpilot_graph",
+        lambda: _DirectionNoticeGraph(),
+    )
+
+    r = client.post(
+        "/api/v1/chat/stream",
+        json={"message": "삼성전자 왜 떨어져?", "session_id": "direction-notice-stream"},
+    )
+
+    assert r.status_code == 200
+    events = _parse_sse(r.text)
+    assert all(event["type"] != "token" for event in events)
+    response = next(event for event in events if event["type"] == "response")
+    assert response["content"].startswith(notice)
+    assert "삼성전자 ▼ 0.20% 하락" not in response["content"]
 
 
 def test_chat_api_blocks_buy_sell_advice_request():
