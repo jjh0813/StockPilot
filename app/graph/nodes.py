@@ -10,6 +10,7 @@ from loguru import logger
 from app.core.guardrails import sanitize_llm_output
 from app.core.llm import ainvoke_with_fallback
 from app.core.market_time import tag_session
+from app.repositories.price import resolve_ticker
 from app.core.prompts import (
     RAG_GROUNDING,
     RAG_RESPONSE_PROMPT,
@@ -311,6 +312,19 @@ async def router_node(state: StockPilotState) -> dict:
                         wants_definition=wants_definition,
                     ):
                         return {"intent": "chat", "screen": False, "ticker": None}
+
+            # KNOWN_STOCKS 밖의 상장 종목도 인식: 이름이 코드로 해석되면 시세 분석(tool)으로 처리
+            cand = _clean_ticker(text)
+            if cand and not is_rag and not wants_definition:
+                try:
+                    code = await resolve_ticker(cand)
+                except Exception:
+                    code = None
+                if code:
+                    _SESSION_TICKER[session_id] = code
+                    mode = "disclosure" if (wants_disclosure and not wants_definition) else "market"
+                    logger.info(f"🔀 [Router] intent=tool (resolved listed stock: {cand})")
+                    return {"intent": "tool", "screen": False, "ticker": code, "tool_mode": mode}
 
             logger.info("🔀 [Router] intent=chat (out-of-scope)")
             return {"intent": "chat", "screen": False, "ticker": None}
