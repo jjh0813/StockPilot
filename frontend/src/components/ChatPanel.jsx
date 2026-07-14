@@ -13,6 +13,8 @@ const MODEL_LABELS = {
 function modelFamily(value) {
   const v = String(value || '').toLowerCase()
   if (!v) return ''
+  if (v === 'template-fallback') return 'template-fallback'
+  if (v.startsWith('template-')) return 'template-intentional'
   if (v.includes('solar')) return 'solar'
   if (v.includes('gpt')) return 'gpt'
   if (v.includes('gemini')) return 'gemini'
@@ -29,6 +31,10 @@ function modelLabel(value) {
   if (family === 'gpt') return 'GPT'
   if (family === 'gemini') return 'Gemini'
   if (family === 'claude') return 'Claude'
+  if (value === 'template-market-overview') return '요즘 흐름 요약'
+  if (value === 'template-direction-correction') return '방향 보정 요약'
+  if (value === 'template-fallback') return '기본 템플릿'
+  if (family === 'template-intentional') return '안전 요약 템플릿'
   if (family === 'template') return '기본 템플릿'
   return value || ''
 }
@@ -38,7 +44,8 @@ function fallbackNotice(requestedModel, usedModel) {
   const requestedFamily = modelFamily(requestedModel)
   const usedFamily = modelFamily(usedModel)
   if (!requestedFamily || !usedFamily || requestedFamily === usedFamily) return ''
-  if (usedFamily === 'template') {
+  if (usedFamily === 'template-intentional') return ''
+  if (usedFamily === 'template' || usedFamily === 'template-fallback') {
     return `${modelLabel(requestedModel)} 응답에 실패해서 기본 템플릿으로 대체했습니다.`
   }
   return `${modelLabel(requestedModel)} 응답에 실패해서 ${modelLabel(usedModel)}로 대체했습니다.`

@@ -4,7 +4,10 @@ function cleanModel(m) {
   if (!m) return ''
   let s = String(m)
   if (s.includes('/')) s = s.split('/').pop()   // gemini/gemini-2.0-flash → gemini-2.0-flash
-  if (s.toLowerCase().includes('template')) return '기본 템플릿(오프라인 폴백)'
+  if (s === 'template-market-overview') return '요즘 흐름 요약'
+  if (s === 'template-direction-correction') return '방향 보정 요약'
+  if (s === 'template-fallback') return '기본 템플릿(오프라인 폴백)'
+  if (s.toLowerCase().includes('template')) return '안전 요약 템플릿'
   return s
 }
 
