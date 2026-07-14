@@ -2,6 +2,9 @@
 import asyncio
 import json
 import re
+import threading
+from copy import deepcopy
+from time import monotonic
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
@@ -22,6 +25,12 @@ from app.repositories.rag import search_documents
 from app.tools.executor import ToolExecutor
 
 _executor = ToolExecutor()
+_SCREENER_PANEL_CACHE_TTL_SECONDS = 300
+_SCREENER_PANEL_CACHE_LOCK = threading.Lock()
+_SCREENER_PANEL_CACHE: dict[
+    tuple[tuple[str, str], ...],
+    tuple[float, list[dict]],
+] = {}
 
 # 세션별 직전 분석 종목 (후속 질문 문맥 유지용)
 _SESSION_TICKER: dict[str, str] = {}
@@ -325,8 +334,10 @@ async def tool_node(state: StockPilotState) -> dict:
         result = await _executor.execute("find_positive_news_stocks", {})
         stocks = (result.get("data") or {}).get("stocks", [])
         logger.info(f"🔧 [Tool] 스크리너 완료 | 종목 {len(stocks)}개")
-        # 상위 종목별 시세·뉴스·공시를 병렬 수집 → 가운데 패널에 순서대로 표시
-        panels = await _collect_screener_panels(stocks[:5])
+        # 상위 종목별 시세·뉴스를 병렬 수집 → 가운데 패널에 순서대로 표시.
+        # 공시는 스크리너 질문의 핵심 근거가 아니어서 여기서는 생략하고,
+        # 사용자가 특정 종목의 공시를 물으면 get_disclosure 전용 흐름으로 조회한다.
+        panels = await _collect_screener_panels(stocks[:3])
         return {
             "screener_results": stocks,
             "screener_panels": panels,
@@ -399,7 +410,13 @@ async def tool_node(state: StockPilotState) -> dict:
 
 
 async def _collect_screener_panels(stocks: list[dict]) -> list[dict]:
-    """스크리너 상위 종목별로 시세·뉴스·공시를 병렬 수집해 패널 데이터로 만든다."""
+    """스크리너 상위 종목별로 시세·뉴스를 병렬 수집해 패널 데이터로 만든다."""
+    cache_key = _screener_panel_cache_key(stocks)
+    cached = _get_cached_screener_panels(cache_key)
+    if cached is not None:
+        logger.debug("스크리너 패널 캐시 hit")
+        return cached
+
     semaphore = asyncio.Semaphore(5)
 
     async def _one(stock: dict) -> dict | None:
@@ -407,27 +424,58 @@ async def _collect_screener_panels(stocks: list[dict]) -> list[dict]:
         if not name:
             return None
         async with semaphore:
-            price_task = asyncio.create_task(
-                _executor.execute("get_stock_price", {"ticker": name, "period": "1m"})
-            )
-            disclosure_task = asyncio.create_task(
-                _executor.execute("get_disclosure", {"ticker": name, "limit": 3})
-            )
             try:
-                price, disc = await asyncio.gather(price_task, disclosure_task)
+                price = await _executor.execute(
+                    "get_stock_price",
+                    {"ticker": name, "period": "1m"},
+                )
             except Exception:
-                logger.warning(f"스크리너 패널 수집 실패: {name}")
+                logger.warning(f"스크리너 패널 시세 실패: {name}")
                 return None
 
         price_data = price.get("data")
         if not price_data:
             return None
         news_items = [tag_session(item) for item in (stock or {}).get("news", [])]
-        disclosures = (disc.get("data") or {}).get("disclosures", []) or []
-        return {"price": price_data, "news": news_items, "disclosures": disclosures}
+        return {"price": price_data, "news": news_items, "disclosures": []}
 
     results = await asyncio.gather(*(_one(s) for s in stocks))
-    return [r for r in results if r]
+    panels = [r for r in results if r]
+    _set_cached_screener_panels(cache_key, panels)
+    return panels
+
+
+def _screener_panel_cache_key(stocks: list[dict]) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (
+            str((stock or {}).get("ticker") or ""),
+            str((stock or {}).get("top_news") or ""),
+        )
+        for stock in stocks
+    )
+
+
+def _get_cached_screener_panels(
+    cache_key: tuple[tuple[str, str], ...],
+) -> list[dict] | None:
+    now = monotonic()
+    with _SCREENER_PANEL_CACHE_LOCK:
+        cached = _SCREENER_PANEL_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        created_at, panels = cached
+        if now - created_at > _SCREENER_PANEL_CACHE_TTL_SECONDS:
+            _SCREENER_PANEL_CACHE.pop(cache_key, None)
+            return None
+        return deepcopy(panels)
+
+
+def _set_cached_screener_panels(
+    cache_key: tuple[tuple[str, str], ...],
+    panels: list[dict],
+) -> None:
+    with _SCREENER_PANEL_CACHE_LOCK:
+        _SCREENER_PANEL_CACHE[cache_key] = (monotonic(), deepcopy(panels))
 
 
 def _format_change(change_pct: float | None) -> tuple[str, str]:
