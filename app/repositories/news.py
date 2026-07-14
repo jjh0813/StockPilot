@@ -435,6 +435,27 @@ async def get_stock_issue_news(
         ),
         reverse=True,
     )
+    if direction in {"down", "up"}:
+        supported = [item for item in ranked if item["has_direction_evidence"]]
+        if supported:
+            fallback = [
+                {
+                    **item,
+                    "filter_fallback": True,
+                }
+                for item in ranked
+                if not item["has_direction_evidence"]
+                and not item["opposite_direction_keywords"]
+                and item["direct_company_match"]
+            ]
+            ranked = supported + fallback
+        else:
+            for item in ranked:
+                item["filter_fallback"] = True
+            logger.warning(
+                f"방향 근거 뉴스 부족: company={company}, direction={direction}, "
+                f"candidates={len(ranked)}"
+            )
     logger.info(
         f"주가 이슈 뉴스 선별: company={company}, direction={direction}, "
         f"collected={len(collected)}, unique={len(unique)}, selected={len(ranked)}"

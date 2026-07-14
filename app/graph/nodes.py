@@ -747,8 +747,13 @@ def _topic_subject(name: str) -> str:
     return f"{name}은"
 
 
-def _tool_context(price: dict, news_items: list[dict], direction_notice: str | None = None) -> str:
-    """Solar에 넘길 근거 데이터(시세·뉴스)를 텍스트로 정리한다."""
+def _tool_context(
+    price: dict,
+    news_items: list[dict],
+    disclosures: list[dict] | None = None,
+    direction_notice: str | None = None,
+) -> str:
+    """Solar에 넘길 근거 데이터(시세·뉴스·공시)를 텍스트로 정리한다."""
     lines: list[str] = []
     if direction_notice:
         lines.append(f"방향 보정 안내: {direction_notice}")
@@ -761,14 +766,38 @@ def _tool_context(price: dict, news_items: list[dict], direction_notice: str | N
         lines.append(f"등락률: {arrow} {abs(change_pct):.2f}% {direction}")
     if current_price is not None:
         lines.append(f"현재가: {int(current_price):,}원")
-    if news_items:
+    strong_news = [item for item in news_items if not item.get("filter_fallback")]
+    fallback_news = [item for item in news_items if item.get("filter_fallback")]
+    if strong_news:
         lines.append("관련 뉴스:")
-        for item in news_items[:5]:
+        for item in strong_news[:5]:
+            title = item.get("title", "")
+            source = item.get("source_domain", "")
+            session = item.get("market_session", "")
+            evidence = ", ".join(item.get("direction_keywords") or [])
+            meta = " · ".join(x for x in (source, session) if x)
+            suffix = f" ({meta})" if meta else ""
+            evidence_text = f" / 방향 근거: {evidence}" if evidence else ""
+            lines.append(f"- {title}{suffix}{evidence_text}")
+    elif fallback_news:
+        lines.append(
+            "관련 뉴스: 질문한 방향을 직접 뒷받침하는 뉴스는 충분하지 않습니다. "
+            "아래 뉴스는 종목 관련 참고 뉴스이며 원인으로 단정하지 마세요."
+        )
+        for item in fallback_news[:3]:
             title = item.get("title", "")
             source = item.get("source_domain", "")
             session = item.get("market_session", "")
             meta = " · ".join(x for x in (source, session) if x)
             lines.append(f"- {title}" + (f" ({meta})" if meta else ""))
+    else:
+        lines.append("관련 뉴스: 질문한 방향을 직접 뒷받침하는 최근 뉴스를 찾지 못했습니다.")
+    if disclosures:
+        lines.append("관련 공시:")
+        for item in disclosures[:5]:
+            title = item.get("report_name") or item.get("title") or "공시"
+            date = item.get("received_date") or item.get("date") or ""
+            lines.append(f"- {title}" + (f" ({date})" if date else ""))
     return "\n".join(lines)
 
 
@@ -986,6 +1015,7 @@ async def response_node(state: StockPilotState) -> dict:
 
     price = state.get("price_data") or {}
     news_items = state.get("news_items") or []
+    disclosures = state.get("disclosures") or []
     docs = state.get("retrieved_docs") or []
     direction_notice = state.get("direction_notice")
     user_text = _last_user_text(state)
@@ -1028,11 +1058,13 @@ async def response_node(state: StockPilotState) -> dict:
             system += RAG_GROUNDING.format(context="\n\n".join(docs))
         if price or news_items:
             system += TOOL_GROUNDING.format(
-                tool_result=_tool_context(price, news_items, direction_notice)
+                tool_result=_tool_context(price, news_items, disclosures, direction_notice)
             )
             system += (
                 "\n\n중요: 상승/하락 방향은 반드시 위 '등락률'의 부호를 그대로 따르라. "
                 "뉴스 내용이 반대로 보여도 실제 등락률 부호(+ 상승 / - 하락)를 기준으로 설명하라."
+                "\n중요: '관련 뉴스'에 방향 근거가 부족하다고 적혀 있으면 뉴스를 억지로 원인으로 해석하지 말고, "
+                "공시나 확인 가능한 사실 중심으로 '직접 원인은 제한적'이라고 말하라."
             )
             if direction_notice:
                 system += (

@@ -229,6 +229,45 @@ async def test_get_stock_issue_news_prioritizes_downward_issue(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_stock_issue_news_marks_weak_direction_evidence_as_fallback(monkeypatch):
+    monkeypatch.setattr("app.repositories.news.settings.naver_client_id", "client-id")
+    monkeypatch.setattr(
+        "app.repositories.news.settings.naver_client_secret",
+        "client-secret",
+    )
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    _news_item(
+                        title="현대로템 K-방산 수출 기대 속 주목",
+                        description="현대로템 방산 사업과 수출 기대감이 커지고 있다.",
+                        url="https://example.com/neutral",
+                    ),
+                    _news_item(
+                        title="현대로템 신규 전장 기술 공개",
+                        description="유무인 체계 관련 기술을 선보였다.",
+                        url="https://example.com/tech",
+                    ),
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        items = await get_stock_issue_news(
+            "현대로템",
+            direction="down",
+            client=client,
+        )
+
+    assert items
+    assert all(item["filter_fallback"] is True for item in items)
+    assert all(item["has_direction_evidence"] is False for item in items)
+
+
+@pytest.mark.asyncio
 async def test_get_stock_issue_news_fetches_query_variants_concurrently(monkeypatch):
     monkeypatch.setattr("app.repositories.news.settings.naver_client_id", "client-id")
     monkeypatch.setattr(
