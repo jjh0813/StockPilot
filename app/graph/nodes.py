@@ -654,11 +654,11 @@ def _overview_lead_sentence(name: str, period: str, trend_text: str, trend_pct: 
         daily_word = "상승" if daily_direction == "up" else "하락"
         if trend_direction != daily_direction:
             return (
-                f"{subject} 일봉 기준 {period} 흐름은 {trend_word} 추세지만, "
+                f"{subject} 일봉 기준으로 보면 {period} 흐름은 {trend_word} 추세지만, "
                 f"기준일 하루 움직임은 전 거래일 대비 {daily_word}입니다."
             )
         return (
-            f"{subject} 일봉 기준 {period} 흐름과 기준일 하루 움직임 모두 "
+            f"{subject} 일봉 기준으로 보면 {period} 흐름과 기준일 하루 움직임 모두 "
             f"{daily_word} 쪽입니다."
         )
 
