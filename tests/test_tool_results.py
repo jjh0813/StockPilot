@@ -22,6 +22,7 @@ def test_price_mock_matches_actual_normalized_contract():
         "ticker",
         "name",
         "as_of",
+        "snapshot_at",
         "current_price",
         "previous_close",
         "change",

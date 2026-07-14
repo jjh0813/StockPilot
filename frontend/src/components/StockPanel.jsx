@@ -18,7 +18,76 @@ function formatPct(p) {
   const a = Math.abs(p).toFixed(2)
   if (p > 0) return { text: `▲ ${a}%`, cls: 'text-red-400' }
   if (p < 0) return { text: `▼ ${a}%`, cls: 'text-blue-400' }
-  return { text: `― ${a}%`, cls: 'text-neutral-300' }
+  return { text: `- ${a}%`, cls: 'text-neutral-300' }
+}
+
+function formatDate(value) {
+  if (!value) return '확인 불가'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date)
+}
+
+function formatDateTime(value) {
+  if (!value) return '확인 불가'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
+function recentTrend(ohlcv = []) {
+  const closes = ohlcv
+    .map((row) => Number(row.close))
+    .filter((value) => Number.isFinite(value) && value !== 0)
+  if (closes.length < 2) {
+    return { label: '흐름을 판단할 데이터가 부족합니다.', delta: null, tone: 'text-neutral-300' }
+  }
+  const lookback = Math.min(20, closes.length - 1)
+  const base = closes[closes.length - 1 - lookback]
+  const latest = closes[closes.length - 1]
+  const delta = ((latest - base) / base) * 100
+  if (delta >= 3) {
+    return { label: '요즘은 올라가는 추세입니다.', delta, tone: 'text-red-300' }
+  }
+  if (delta <= -3) {
+    return { label: '요즘은 내려가는 추세입니다.', delta, tone: 'text-blue-300' }
+  }
+  return { label: '요즘은 큰 방향성 없이 오르내리는 흐름입니다.', delta, tone: 'text-neutral-300' }
+}
+
+function TrendSummary({ price }) {
+  const trend = recentTrend(price.ohlcv || [])
+  const pct = formatPct(price.change_pct)
+  const tradeDays = price.ohlcv?.length || 0
+  return (
+    <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-white">요즘 흐름</h3>
+        <span className="text-xs text-neutral-500">일봉 기준</span>
+      </div>
+      <p className={`text-lg font-semibold leading-snug ${trend.tone}`}>{trend.label}</p>
+      <div className="mt-3 space-y-1 text-xs leading-relaxed text-neutral-400">
+        <p>
+          차트 기간: {tradeDays ? `최근 ${tradeDays}거래일` : '최근 기간'} · 기준일:{' '}
+          {formatDate(price.as_of)}
+        </p>
+        <p>조회시각: {formatDateTime(price.snapshot_at)}</p>
+        {pct && <p>등락률은 전 거래일 대비이며, 현재 {pct.text}입니다.</p>}
+        {trend.delta !== null && <p>최근 흐름 변화폭은 약 {trend.delta.toFixed(2)}%입니다.</p>}
+      </div>
+    </div>
+  )
 }
 
 function StockPanel({ price, news, disclosures }) {
@@ -45,7 +114,8 @@ function StockPanel({ price, news, disclosures }) {
         </BorderGlow>
         <BorderGlow {...GLOW} borderRadius={16} className="sm:col-span-2">
           <div className="p-5">
-            <div className="h-[292px]">
+            <TrendSummary price={price} />
+            <div className="h-[188px]">
               <NewsList news={news} />
             </div>
           </div>

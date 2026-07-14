@@ -62,6 +62,7 @@ def _one_stock_payload(price: dict | None, news: list, disclosures: list) -> dic
                 "change_pct": price.get("change_pct"),
                 "current_price": price.get("current_price"),
                 "as_of": price.get("as_of"),
+                "snapshot_at": price.get("snapshot_at"),
                 "period": price.get("period"),
                 # 차트용 일봉 시계열 (date, open, high, low, close, volume, change_pct)
                 "ohlcv": price.get("ohlcv") or [],

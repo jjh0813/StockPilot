@@ -10,7 +10,7 @@ import math
 import threading
 import os
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from time import monotonic
 from typing import Any
 
@@ -109,7 +109,7 @@ _CODE_NAME: dict[str, str] = {}
 _INDEX_LOCK = threading.Lock()
 _SENSITIVE_STDIO_LOCK = threading.Lock()
 _SNAPSHOT_CACHE_LOCK = threading.Lock()
-_SNAPSHOT_CACHE_TTL_SECONDS = 60
+_SNAPSHOT_CACHE_TTL_SECONDS = 180
 _SNAPSHOT_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
 
 
@@ -299,6 +299,7 @@ async def get_stock_snapshot(
         "ticker": code,
         "name": _TICKER_NAMES.get(code) or _CODE_NAME.get(code) or ticker,
         "as_of": latest["date"],
+        "snapshot_at": datetime.now(timezone.utc).isoformat(),
         "current_price": current_price,
         "previous_close": previous_close,
         "change": change,

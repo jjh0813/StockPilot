@@ -11,6 +11,7 @@ def stock_snapshot() -> dict[str, Any]:
         "ticker": "005930",
         "name": "삼성전자",
         "as_of": "2026-07-09",
+        "snapshot_at": "2026-07-09T01:30:00+00:00",
         "current_price": 71400,
         "previous_close": 70000,
         "change": 1400,

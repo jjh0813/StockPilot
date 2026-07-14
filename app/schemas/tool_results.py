@@ -41,6 +41,7 @@ class StockPriceData(ToolResultModel):
     ticker: str
     name: str
     as_of: str
+    snapshot_at: str | None = None
     current_price: Number
     previous_close: Number | None
     change: Number | None

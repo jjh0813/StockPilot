@@ -25,6 +25,31 @@ function dirWord(p) {
   return '보합'
 }
 
+function formatDate(value) {
+  if (!value) return '확인 불가'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date)
+}
+
+function formatDateTime(value) {
+  if (!value) return '확인 불가'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
 function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms, usedModel, modelNotice }) {
   const pct = price && price.change_pct !== null && price.change_pct !== undefined
     ? Number(price.change_pct)
@@ -67,8 +92,14 @@ function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms,
         </div>
       )}
       {price && price.current_price != null && (
-        <p className="mb-4 text-neutral-300">
+        <p className="text-neutral-300">
           현재가 {Number(price.current_price).toLocaleString()}원
+        </p>
+      )}
+      {price && (
+        <p className="mb-4 mt-2 text-xs leading-relaxed text-neutral-500">
+          일봉 기준 · 등락률은 전 거래일 대비 · 기준일 {formatDate(price.as_of)} · 조회시각{' '}
+          {formatDateTime(price.snapshot_at)}
         </p>
       )}
 

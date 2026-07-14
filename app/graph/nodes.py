@@ -2,6 +2,7 @@
 import asyncio
 import json
 import re
+from datetime import datetime, timedelta, timezone
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
@@ -479,6 +480,110 @@ def _direction_word(direction: str) -> str:
     return "보합"
 
 
+def _is_market_overview_question(text: str) -> bool:
+    """'요즘 어때?'처럼 현재 흐름을 묻는 질문인지 판별한다."""
+
+    lower = (text or "").lower()
+    overview_hints = ("요즘", "어때", "어떰", "상황", "흐름", "최근", "분위기")
+    reason_hints = ("왜", "이유", "원인", "때문", "뭐 때문에", "뭔 일")
+    action_hints = ("살까", "팔까", "매수", "매도", "추천")
+    return (
+        any(hint in lower for hint in overview_hints)
+        and not any(hint in lower for hint in reason_hints)
+        and not any(hint in lower for hint in action_hints)
+    )
+
+
+def _format_date_kr(value: str | None) -> str:
+    if not value:
+        return "확인 불가"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.strftime("%Y.%m.%d")
+    except ValueError:
+        return value
+
+
+def _format_datetime_kst(value: str | None) -> str:
+    if not value:
+        return "확인 불가"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone(timedelta(hours=9))).strftime("%Y.%m.%d %H:%M")
+    except ValueError:
+        return value
+
+
+def _period_label(period: str | None, ohlcv_len: int) -> str:
+    if ohlcv_len > 0:
+        return f"최근 {ohlcv_len}거래일"
+    labels = {
+        "1w": "최근 1주",
+        "1m": "최근 1개월",
+        "3m": "최근 3개월",
+        "6m": "최근 6개월",
+        "1y": "최근 1년",
+    }
+    return labels.get(period or "", "최근 기간")
+
+
+def _recent_trend_from_ohlcv(ohlcv: list[dict]) -> tuple[str, float | None]:
+    closes = [
+        float(row["close"])
+        for row in (ohlcv or [])
+        if isinstance(row.get("close"), (int, float)) and row.get("close") not in (None, 0)
+    ]
+    if len(closes) < 2:
+        return "흐름을 판단할 만큼 차트 데이터가 충분하지 않습니다", None
+    lookback = min(20, len(closes) - 1)
+    base = closes[-lookback - 1]
+    latest = closes[-1]
+    if base == 0:
+        return "흐름을 판단할 만큼 차트 데이터가 충분하지 않습니다", None
+    delta = round((latest - base) / base * 100, 2)
+    if delta >= 3:
+        return "최근에는 올라가는 추세입니다", delta
+    if delta <= -3:
+        return "최근에는 내려가는 추세입니다", delta
+    return "최근에는 큰 방향성 없이 오르내리는 흐름입니다", delta
+
+
+def _market_overview_answer(price: dict) -> str:
+    """단순 현황 질문에는 원인 분석 대신 기준이 분명한 요약을 반환한다."""
+
+    name = price.get("name") or "해당 종목"
+    change_pct = price.get("change_pct")
+    current_price = price.get("current_price")
+    ohlcv = price.get("ohlcv") or []
+    trend_text, trend_pct = _recent_trend_from_ohlcv(ohlcv)
+    period = _period_label(price.get("period"), len(ohlcv))
+    as_of = _format_date_kr(price.get("as_of"))
+    snapshot_at = _format_datetime_kst(price.get("snapshot_at"))
+
+    lines = [
+        f"{_topic_subject(name)} 일봉 기준 {period}으로 보면 {trend_text}.",
+        "",
+        f"기준일: {as_of} · 조회시각: {snapshot_at}",
+    ]
+    if current_price is not None:
+        lines.append(f"현재가: {int(current_price):,}원")
+    if change_pct is not None:
+        arrow, direction = _format_change(change_pct)
+        lines.append(f"전 거래일 대비: {arrow} {abs(change_pct):.2f}% {direction}")
+    if trend_pct is not None:
+        lines.append(f"최근 흐름 변화폭: {trend_pct:+.2f}%")
+
+    lines += [
+        "",
+        "이 움직임의 배경이 궁금하면 “왜 올랐어?” 또는 “왜 떨어졌어?”처럼 물어보면 뉴스와 공시 근거로 더 자세히 설명해드릴게요.",
+        "",
+        "※ 투자 자문이 아닌 참고 정보입니다.",
+    ]
+    return "\n".join(lines)
+
+
 def _topic_subject(name: str) -> str:
     """회사명에 자연스러운 주제 조사(은/는)를 붙인다."""
 
@@ -743,6 +848,14 @@ async def response_node(state: StockPilotState) -> dict:
         return {
             "messages": [AIMessage(content=answer)],
             "used_model": "template-direction-correction",
+        }
+
+    if intent == "tool" and price and _is_market_overview_question(user_text):
+        logger.info("💬 [Response] 시장 현황 요약 템플릿 응답 생성 완료")
+        answer = sanitize_llm_output(_market_overview_answer(price))
+        return {
+            "messages": [AIMessage(content=answer)],
+            "used_model": "template-market-overview",
         }
 
     # 용어/개념 질문(rag): 사전에 있는 용어면 LLM 없이 바로 정의를 돌려준다(토큰 절약).

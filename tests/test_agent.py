@@ -238,6 +238,29 @@ async def test_response_node_format():
     assert "투자 자문이 아닌" in content
 
 
+async def test_response_node_overview_keeps_header_but_avoids_reason_analysis():
+    state = create_initial_state("overview")
+    state["intent"] = "tool"
+    state["ticker"] = "삼성전자"
+    state["price_data"] = {
+        **stock_snapshot(),
+        "snapshot_at": "2026-07-09T01:30:00+00:00",
+    }
+    state["news_items"] = [_normalize_news_item(directional_news_item(), "down")]
+    state["messages"] = [HumanMessage(content="삼성전자 요즘 어때?")]
+
+    result = await response_node(state)
+    content = result["messages"][-1].content
+
+    assert result["used_model"] == "template-market-overview"
+    assert "삼성전자" in content
+    assert "일봉 기준" in content
+    assert "기준일" in content
+    assert "조회시각" in content
+    assert "전 거래일 대비" in content
+    assert "원인 분석" not in content
+
+
 async def test_tool_node_corrects_requested_down_when_actual_price_is_up(monkeypatch):
     calls = []
 
