@@ -134,6 +134,20 @@ async def test_router_node_followup_disclosure_uses_previous_ticker():
     assert result["tool_mode"] == "disclosure"
 
 
+async def test_router_node_followup_cause_reuses_previous_ticker():
+    state = create_initial_state("cause-followup")
+    state["messages"] = [HumanMessage(content="삼성전자 요즘 어때?")]
+    await router_node(state)
+
+    state = create_initial_state("cause-followup")
+    state["messages"] = [HumanMessage(content="원인이 뭐야?")]
+    result = await router_node(state)
+
+    assert result["intent"] == "tool"
+    assert result["ticker"] == "삼성전자"
+    assert result["tool_mode"] == "market"
+
+
 async def test_router_node_business_report_risk_uses_rag_not_disclosure():
     state = create_initial_state("report-risk")
     state["messages"] = [HumanMessage(content="삼성전자 사업보고서에서 리스크 요인 알려줘")]

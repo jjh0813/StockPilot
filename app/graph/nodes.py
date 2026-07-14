@@ -85,13 +85,17 @@ _ROUTER_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 # 후속 질문 힌트 (종목명 없이 직전 종목을 이어 묻는 경우)
 FOLLOWUP_HINTS = (
     "왜", "그럼", "그래서", "이유", "더", "자세", "어떻게", "그건", "방금", "전망",
-    "공시", "보고서",
+    "공시", "보고서", "원인", "배경", "무슨 일", "뭔 일",
 )
 
 FOLLOWUP_DOMAIN_HINTS = (
-    "왜", "이유", "더", "자세", "전망", "어떻게", "그건", "방금",
+    "왜", "이유", "원인", "배경", "더", "자세", "전망", "어떻게", "그건", "방금",
     "떨어", "하락", "올라", "상승", "급락", "급등",
-    "뉴스", "공시", "재무", "실적", "리스크", "보고서",
+    "뉴스", "공시", "재무", "실적", "리스크", "보고서", "무슨 일", "뭔 일",
+)
+
+CAUSE_HINTS = (
+    "왜", "이유", "원인", "배경", "무슨 일", "뭔 일", "무슨일", "뭔일",
 )
 
 # 종목명 사전(ticker 추출용). 실제 종목 매핑은 이후 확장.
@@ -169,6 +173,13 @@ def _is_screener_query(text: str, *, wants_definition: bool) -> bool:
     return has_positive_news and has_target
 
 
+def _is_cause_question(text: str) -> bool:
+    """등락 배경/원인을 묻는 질문인지 판별한다."""
+
+    lower = (text or "").lower()
+    return any(hint in lower for hint in CAUSE_HINTS)
+
+
 def _parse_router_json(content: str) -> dict | None:
     """Solar 라우터의 JSON 응답을 안전하게 파싱한다."""
 
@@ -240,6 +251,7 @@ async def router_node(state: StockPilotState) -> dict:
     is_rag = any(hint in lower for hint in RAG_HINTS)
     wants_definition = any(hint in lower for hint in DEFINITION_HINTS)
     wants_disclosure = any(hint in lower for hint in DISCLOSURE_HINTS)
+    wants_cause = _is_cause_question(text)
     is_domain_query = _has_investment_domain(text)
 
     if matched_stock:
@@ -249,7 +261,7 @@ async def router_node(state: StockPilotState) -> dict:
             intent = "tool"
             tool_mode = "disclosure"
         else:
-            intent = "rag" if is_rag else "tool"
+            intent = "tool" if wants_cause else ("rag" if is_rag else "tool")
             tool_mode = "market" if intent == "tool" else None
     elif is_rag and is_domain_query:
         ticker = _clean_ticker(text)
@@ -269,7 +281,7 @@ async def router_node(state: StockPilotState) -> dict:
                 intent = "tool"
                 tool_mode = "disclosure"
             else:
-                intent = "rag" if is_rag else "tool"
+                intent = "tool" if wants_cause else ("rag" if is_rag else "tool")
                 tool_mode = "market" if intent == "tool" else None
         else:
             # 명확한 스크리너 표현은 고신뢰 룰로 즉시 처리한다.
