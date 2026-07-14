@@ -793,10 +793,29 @@ async def response_node(state: StockPilotState) -> dict:
         answer = _fallback_answer(price, news_items, docs, direction_notice)
         used_model = "template-fallback"
 
-    if direction_notice and direction_notice not in answer:
-        answer = f"{direction_notice}\n\n{answer}"
+    if direction_notice:
+        answer = _force_direction_notice_first(answer, direction_notice)
 
     answer = sanitize_llm_output(answer)
 
     logger.info(f"💬 [Response] 응답 생성 완료 (model={used_model})")
     return {"messages": [AIMessage(content=answer)], "used_model": used_model}
+
+
+def _force_direction_notice_first(answer: str, direction_notice: str) -> str:
+    """방향 보정이 필요한 답변은 보정 안내가 반드시 첫 문장이 되도록 정리한다."""
+
+    prefix = f"방향 보정 안내: {direction_notice}"
+    cleaned = (answer or "").strip()
+    if not cleaned:
+        return prefix
+
+    notice_index = cleaned.find(direction_notice)
+    if notice_index >= 0:
+        cleaned = cleaned[notice_index + len(direction_notice) :].lstrip()
+        cleaned = re.sub(r"^[\s:：\\-–—|]+", "", cleaned).lstrip()
+        if cleaned:
+            return f"{prefix}\n\n{cleaned}"
+        return prefix
+
+    return f"{prefix}\n\n{cleaned}"

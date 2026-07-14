@@ -403,5 +403,44 @@ async def test_response_node_prepends_direction_notice_when_llm_omits_it(monkeyp
     result = await response_node(state)
     content = result["messages"][-1].content
 
-    assert content.startswith(notice)
+    assert content.startswith(f"방향 보정 안내: {notice}")
     assert "투자 자문이 아닌" in content
+
+
+async def test_response_node_moves_direction_notice_before_stale_prefix(monkeypatch):
+    notice = "현재 삼성전자는 상승 중이라, 요청하신 하락 원인 대신 최근 상승과 관련 있어 보이는 뉴스를 기준으로 정리합니다."
+
+    class FakeResult:
+        message = type(
+            "Message",
+            (),
+            {
+                "content": (
+                    "삼성전자 ▼ 2.30% 하락\n\n"
+                    f"방향 보정 안내: {notice}\n\n"
+                    "삼성전자 ▲ 1.77% 상승\n\n원인 분석"
+                )
+            },
+        )()
+        model_name = "fake-router-model"
+        model_id = "solar"
+        fallback_used = False
+
+    async def fake_ainvoke(*args, **kwargs):
+        return FakeResult()
+
+    monkeypatch.setattr("app.graph.nodes.ainvoke_with_fallback", fake_ainvoke)
+
+    state = create_initial_state("direction-notice-stale-prefix")
+    state["ticker"] = "삼성전자"
+    state["price_data"] = {**stock_snapshot(), "change_pct": 1.77}
+    state["news_items"] = [_normalize_news_item(directional_news_item(), "up")]
+    state["direction_notice"] = notice
+    state["messages"] = [HumanMessage(content="오르고 있는데 왜 떨어져?")]
+
+    result = await response_node(state)
+    content = result["messages"][-1].content
+
+    assert content.startswith(f"방향 보정 안내: {notice}")
+    assert "삼성전자 ▼ 2.30% 하락" not in content
+    assert "삼성전자 ▲ 1.77% 상승" in content
