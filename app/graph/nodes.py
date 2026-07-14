@@ -621,7 +621,7 @@ def _fallback_answer(
         lines.append("📌 원인 분석")
         if news_items:
             subject = "움직임" if direction == "보합" else direction
-            lines.append(f"최근 {subject}은(는) 다음 이슈와 관련 있어 보입니다:")
+            lines.append(f"최근 {subject}은 다음 이슈와 관련 있어 보입니다:")
             for item in news_items[:5]:
                 title = item.get("title", "")
                 source = item.get("source_domain", "")
@@ -632,11 +632,11 @@ def _fallback_answer(
         else:
             lines.append("관련 뉴스를 찾지 못했어요.")
         lines.append("")
-        lines.append("※ 투자 자문이 아닌 참고용 정보입니다.")
+        lines.append("※ 투자 자문이 아닌 참고 정보입니다.")
         return "\n".join(lines)
     if docs:
         prefix = f"{direction_notice}\n\n" if direction_notice else ""
-        return prefix + "\n".join(docs) + "\n\n※ 투자 자문이 아닌 참고용 정보입니다."
+        return prefix + "\n".join(docs) + "\n\n※ 투자 자문이 아닌 참고 정보입니다."
     return "관련 정보를 찾지 못했어요. 질문을 조금 더 구체적으로 알려주세요."
 
 
