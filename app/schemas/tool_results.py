@@ -123,6 +123,7 @@ class PositiveNewsStock(ToolResultModel):
     evidence_count: int
     top_news: str
     url: str
+    news: list[NewsItem] | None = None
 
 
 class PositiveNewsStocksData(ToolResultModel):

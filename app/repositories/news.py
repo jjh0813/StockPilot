@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import re
 import threading
@@ -142,6 +143,7 @@ async def search_news(
     *,
     sort: Literal["date", "sim"] = "date",
     client: httpx.AsyncClient | None = None,
+    cache: bool | None = None,
 ) -> list[dict[str, Any]]:
     """네이버 뉴스 API에서 정규화·중복 제거된 검색 결과를 반환합니다."""
     if not query.strip():
@@ -159,7 +161,7 @@ async def search_news(
     }
     params = {"query": query.strip(), "display": display, "start": 1, "sort": sort}
     cache_key = (query.strip(), display, sort)
-    use_cache = client is None
+    use_cache = (client is None) if cache is None else cache
     if use_cache:
         cached = _get_cached_news(cache_key)
         if cached is not None:
@@ -328,6 +330,7 @@ async def get_stock_issue_news(
     direction: Literal["down", "up", "neutral"] = "neutral",
     days: int = 7,
     limit: int = 15,
+    display: int = 50,
     client: httpx.AsyncClient | None = None,
 ) -> list[dict[str, Any]]:
     """주가 방향과 관련 있어 보이는 최신 뉴스 후보를 우선순위화합니다."""
@@ -343,16 +346,27 @@ async def get_stock_issue_news(
     }[direction]
     queries = [company, f"{company} 주가", f"{company} {direction_query}"]
 
-    collected: list[dict[str, Any]] = []
-    for query in queries:
-        collected.extend(
-            await search_news(
-                query,
-                display=50,
-                sort="date",
-                client=client,
+    async def _search_with_client(http_client: httpx.AsyncClient | None):
+        return await asyncio.gather(
+            *(
+                search_news(
+                    query,
+                    display=display,
+                    sort="date",
+                    client=http_client,
+                    cache=client is None,
+                )
+                for query in queries
             )
         )
+
+    if client is None:
+        async with httpx.AsyncClient(timeout=15.0) as http_client:
+            batches = await _search_with_client(http_client)
+    else:
+        batches = await _search_with_client(client)
+
+    collected = [item for batch in batches for item in batch]
     unique = _deduplicate(collected)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     recent = [

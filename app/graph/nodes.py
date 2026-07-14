@@ -400,31 +400,30 @@ async def tool_node(state: StockPilotState) -> dict:
 
 async def _collect_screener_panels(stocks: list[dict]) -> list[dict]:
     """스크리너 상위 종목별로 시세·뉴스·공시를 병렬 수집해 패널 데이터로 만든다."""
+    semaphore = asyncio.Semaphore(5)
 
     async def _one(stock: dict) -> dict | None:
         name = (stock or {}).get("ticker") or ""
         if not name:
             return None
-        try:
-            price = await _executor.execute("get_stock_price", {"ticker": name})
-        except Exception:
-            logger.warning(f"스크리너 패널 시세 실패: {name}")
-            return None
+        async with semaphore:
+            price_task = asyncio.create_task(
+                _executor.execute("get_stock_price", {"ticker": name, "period": "1m"})
+            )
+            disclosure_task = asyncio.create_task(
+                _executor.execute("get_disclosure", {"ticker": name, "limit": 3})
+            )
+            try:
+                price, disc = await asyncio.gather(price_task, disclosure_task)
+            except Exception:
+                logger.warning(f"스크리너 패널 수집 실패: {name}")
+                return None
+
         price_data = price.get("data")
         if not price_data:
             return None
-        try:
-            news = await _executor.execute("get_news", {"company": name, "direction": "up"})
-            news_items = [tag_session(item) for item in news.get("data", {}).get("news", [])]
-        except Exception:
-            news_items = []
-        disclosures: list[dict] = []
-        try:
-            query = (price_data or {}).get("ticker") or name
-            disc = await _executor.execute("get_disclosure", {"ticker": query})
-            disclosures = (disc.get("data") or {}).get("disclosures", []) or []
-        except Exception:
-            disclosures = []
+        news_items = [tag_session(item) for item in (stock or {}).get("news", [])]
+        disclosures = (disc.get("data") or {}).get("disclosures", []) or []
         return {"price": price_data, "news": news_items, "disclosures": disclosures}
 
     results = await asyncio.gather(*(_one(s) for s in stocks))

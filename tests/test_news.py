@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import asyncio
 
 import httpx
 import pytest
@@ -225,3 +226,48 @@ async def test_get_stock_issue_news_prioritizes_downward_issue(monkeypatch):
     assert "급락" in items[0]["direction_keywords"]
     assert items[0]["issue_score"] > items[1]["issue_score"]
     assert items[0]["has_direction_evidence"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_stock_issue_news_fetches_query_variants_concurrently(monkeypatch):
+    monkeypatch.setattr("app.repositories.news.settings.naver_client_id", "client-id")
+    monkeypatch.setattr(
+        "app.repositories.news.settings.naver_client_secret",
+        "client-secret",
+    )
+
+    active = 0
+    max_active = 0
+    queries: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        queries.append(request.url.params["query"])
+        await asyncio.sleep(0.01)
+        active -= 1
+        query = request.url.params["query"]
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    _news_item(
+                        title=f"{query} 호재 상승",
+                        description="신규 수주와 실적 개선 기대가 있다.",
+                        url=f"https://example.com/{len(queries)}",
+                    )
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        items = await get_stock_issue_news(
+            "삼성전자",
+            direction="up",
+            client=client,
+        )
+
+    assert max_active > 1
+    assert set(queries) == {"삼성전자", "삼성전자 주가", "삼성전자 상승"}
+    assert items

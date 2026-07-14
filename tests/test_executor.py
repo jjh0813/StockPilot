@@ -6,6 +6,7 @@ from app.schemas.tool_results import (
     StockPriceResult,
     WatchlistResult,
 )
+from app.tools import executor as executor_module
 from app.tools.executor import ToolExecutor
 from tests.fixtures.tool_responses import (
     directional_news_item,
@@ -54,6 +55,60 @@ async def test_executor_connects_directional_news_repository(monkeypatch):
     assert item["url"] == "https://example.com/down"
     assert item["reason"] == "급락, 우려"
     NewsResult.model_validate(result)
+
+
+async def test_positive_news_screener_reuses_short_cache(monkeypatch):
+    with executor_module._SCREENER_CACHE_LOCK:
+        executor_module._SCREENER_CACHE.clear()
+
+    calls = 0
+
+    async def fake_issue_news(company: str, **kwargs):
+        nonlocal calls
+        calls += 1
+        item = directional_news_item()
+        item.update(
+            {
+                "title": f"{company} 호재 상승",
+                "description": "신규 수주와 실적 개선 기대가 있다.",
+                "direction": "up",
+                "direction_keywords": ["상승", "수주"],
+                "opposite_direction_keywords": [],
+                "has_direction_evidence": True,
+                "issue_score": 20,
+                "ranking_tier": 3,
+            }
+        )
+        return [item]
+
+    monkeypatch.setattr(news, "get_stock_issue_news", fake_issue_news)
+
+    executor = ToolExecutor()
+    first = await executor.find_positive_news_stocks(
+        universe=["삼성전자", "SK하이닉스"],
+        days=3,
+        limit=2,
+    )
+    second = await executor.find_positive_news_stocks(
+        universe=["삼성전자", "SK하이닉스"],
+        days=3,
+        limit=2,
+    )
+
+    assert calls == 2
+    assert second == first
+    assert first["data"]["stocks"][0]["news"]
+
+    second["data"]["stocks"][0]["ticker"] = "mutated"
+    third = await executor.find_positive_news_stocks(
+        universe=["삼성전자", "SK하이닉스"],
+        days=3,
+        limit=2,
+    )
+    assert third["data"]["stocks"][0]["ticker"] != "mutated"
+
+    with executor_module._SCREENER_CACHE_LOCK:
+        executor_module._SCREENER_CACHE.clear()
 
 
 async def test_executor_connects_disclosure_repository(monkeypatch):

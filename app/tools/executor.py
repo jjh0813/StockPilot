@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+from copy import deepcopy
 from datetime import datetime
+from time import monotonic
 from typing import Any, Literal
 
 from loguru import logger
@@ -33,6 +36,13 @@ TOOL_TIMEOUT_SECONDS = {
     "add_watchlist": 15,
     "lookup_glossary_term": 10,
 }
+
+_SCREENER_CACHE_TTL_SECONDS = 300
+_SCREENER_CACHE_LOCK = threading.Lock()
+_SCREENER_CACHE: dict[
+    tuple[tuple[str, ...], int, int],
+    tuple[float, dict[str, Any]],
+] = {}
 
 
 class ToolExecutor:
@@ -171,8 +181,14 @@ class ToolExecutor:
     ) -> dict[str, Any]:
         """유니버스에서 상승 근거 뉴스가 뚜렷한 종목을 선별합니다."""
         companies = universe or DEFAULT_UNIVERSE
+        cache_key = (tuple(companies), days, limit)
+        cached = _get_cached_screener(cache_key)
+        if cached is not None:
+            logger.debug("[find_positive_news_stocks] cache hit")
+            return cached
+
         logger.debug(f"[find_positive_news_stocks] universe_size={len(companies)}")
-        semaphore = asyncio.Semaphore(3)
+        semaphore = asyncio.Semaphore(4)
 
         async def inspect(company: str) -> dict[str, Any] | None:
             async with semaphore:
@@ -182,6 +198,7 @@ class ToolExecutor:
                         direction="up",
                         days=days,
                         limit=5,
+                        display=30,
                     )
                 except Exception as exc:
                     logger.warning(f"호재 스크리너 조회 실패: {company}, {exc}")
@@ -202,6 +219,7 @@ class ToolExecutor:
                 "evidence_count": len(evidence),
                 "top_news": top.get("title"),
                 "url": top.get("original_link") or top.get("link"),
+                "news": [_normalize_news_item(item, "up") for item in evidence[:3]],
             }
 
         results = await asyncio.gather(*(inspect(company) for company in companies))
@@ -210,10 +228,12 @@ class ToolExecutor:
             key=lambda item: (item["evidence_count"], item["positive_score"]),
             reverse=True,
         )
-        return {
+        result = {
             "success": True,
             "data": {"stocks": ranked[:limit]},
         }
+        _set_cached_screener(cache_key, result)
+        return result
 
     async def add_watchlist(
         self,
@@ -286,3 +306,26 @@ def _normalize_news_item(
         }
     )
     return result
+
+
+def _get_cached_screener(
+    cache_key: tuple[tuple[str, ...], int, int],
+) -> dict[str, Any] | None:
+    now = monotonic()
+    with _SCREENER_CACHE_LOCK:
+        cached = _SCREENER_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        created_at, result = cached
+        if now - created_at > _SCREENER_CACHE_TTL_SECONDS:
+            _SCREENER_CACHE.pop(cache_key, None)
+            return None
+        return deepcopy(result)
+
+
+def _set_cached_screener(
+    cache_key: tuple[tuple[str, ...], int, int],
+    result: dict[str, Any],
+) -> None:
+    with _SCREENER_CACHE_LOCK:
+        _SCREENER_CACHE[cache_key] = (monotonic(), deepcopy(result))
