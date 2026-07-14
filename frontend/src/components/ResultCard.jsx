@@ -4,10 +4,10 @@ function cleanModel(m) {
   if (!m) return ''
   let s = String(m)
   if (s.includes('/')) s = s.split('/').pop()   // gemini/gemini-2.0-flash → gemini-2.0-flash
-  if (s === 'template-market-overview') return '요즘 흐름 요약'
-  if (s === 'template-direction-correction') return '방향 보정 요약'
+  if (s === 'template-market-overview') return ''
+  if (s === 'template-direction-correction') return ''
   if (s === 'template-fallback') return '기본 템플릿(오프라인 폴백)'
-  if (s.toLowerCase().includes('template')) return '안전 요약 템플릿'
+  if (s.toLowerCase().includes('template')) return ''
   return s
 }
 
@@ -59,6 +59,7 @@ function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms,
     : null
   const hasPct = pct !== null && !Number.isNaN(pct)
   const showThinking = status === 'loading' && !answer
+  const displayModel = cleanModel(usedModel)
 
   return (
     <div className="w-full rounded-2xl border border-white/15 bg-white/5 p-6 backdrop-blur-lg">
@@ -67,9 +68,9 @@ function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms,
           ⚠️ {modelNotice}
         </div>
       )}
-      {usedModel && (
+      {displayModel && (
         <p className="mb-2 text-[12px] text-neutral-500">
-          이 응답에는 {cleanModel(usedModel)}가 사용되었습니다
+          이 응답에는 {displayModel}가 사용되었습니다
         </p>
       )}
       {showThinking && (
