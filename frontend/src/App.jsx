@@ -96,9 +96,24 @@ function App() {
   }
 
   function handleInsight(id, insight) {
+    const insightKey = insight?.price?.ticker || insight?.price?.name
     setConversations((prev) =>
       prev.map((c) =>
-        c.id === id ? { ...c, insights: [...(c.insights || []), insight] } : c
+        c.id === id
+          ? {
+              ...c,
+              insights: (() => {
+                const current = c.insights || []
+                if (!insightKey) return [...current, insight]
+                const existingIndex = current.findIndex((item) => {
+                  const key = item?.price?.ticker || item?.price?.name
+                  return key === insightKey
+                })
+                if (existingIndex < 0) return [...current, insight]
+                return current.map((item, index) => (index === existingIndex ? insight : item))
+              })(),
+            }
+          : c
       )
     )
   }
