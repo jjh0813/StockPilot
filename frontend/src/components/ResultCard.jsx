@@ -4,20 +4,13 @@ function responseMetaLabel(m) {
   if (!m) return ''
   let s = String(m)
   if (s.includes('/')) s = s.split('/').pop()   // gemini/gemini-2.0-flash → gemini-2.0-flash
-  if (s === 'template-market-overview') return 'StockPilot 요약 엔진'
-  if (s === 'template-direction-correction') return 'StockPilot 방향 보정 엔진'
-  if (s === 'template-fallback') return '기본 템플릿(오프라인 폴백)'
-  if (s.toLowerCase().includes('template')) return 'StockPilot 안전 응답 엔진'
+  if (s.toLowerCase().includes('template')) return ''
   return s
 }
 
 function responseMetaText(m) {
   const label = responseMetaLabel(m)
   if (!label) return ''
-  const value = String(m || '').toLowerCase()
-  if (value.includes('template')) {
-    return `사용 엔진: ${label}`
-  }
   return `사용 모델: ${label}`
 }
 

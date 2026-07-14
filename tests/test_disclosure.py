@@ -102,12 +102,18 @@ async def test_resolve_known_corporation_without_corp_code_download(monkeypatch)
     sk_by_stock_code = await client.resolve_corporation("000660")
     sk_by_name = await client.resolve_corporation("SK하이닉스")
     sk_by_alias = await client.resolve_corporation("하이닉스")
+    hanwha_by_stock_code = await client.resolve_corporation("042660")
+    hanwha_by_name = await client.resolve_corporation("한화오션")
+    hanwha_by_alias = await client.resolve_corporation("대우조선해양")
 
     assert by_stock_code.corp_code == "00126380"
     assert by_name.stock_code == "005930"
     assert sk_by_stock_code.corp_code == "00164779"
     assert sk_by_name.stock_code == "000660"
     assert sk_by_alias.corp_code == "00164779"
+    assert hanwha_by_stock_code.corp_code == "00111704"
+    assert hanwha_by_name.stock_code == "042660"
+    assert hanwha_by_alias.corp_code == "00111704"
 
 
 @pytest.mark.asyncio
