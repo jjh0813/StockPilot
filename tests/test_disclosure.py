@@ -105,6 +105,8 @@ async def test_resolve_known_corporation_without_corp_code_download(monkeypatch)
     hanwha_by_stock_code = await client.resolve_corporation("042660")
     hanwha_by_name = await client.resolve_corporation("한화오션")
     hanwha_by_alias = await client.resolve_corporation("대우조선해양")
+    celltrion_by_stock_code = await client.resolve_corporation("068270")
+    celltrion_by_name = await client.resolve_corporation("셀트리온")
 
     assert by_stock_code.corp_code == "00126380"
     assert by_name.stock_code == "005930"
@@ -114,6 +116,22 @@ async def test_resolve_known_corporation_without_corp_code_download(monkeypatch)
     assert hanwha_by_stock_code.corp_code == "00111704"
     assert hanwha_by_name.stock_code == "042660"
     assert hanwha_by_alias.corp_code == "00111704"
+    assert celltrion_by_stock_code.corp_code == "00413046"
+    assert celltrion_by_name.stock_code == "068270"
+
+
+@pytest.mark.asyncio
+async def test_resolve_corporation_prefers_listed_duplicate_name():
+    client = DartClient("test-key")
+    client._corporations = [
+        disclosure_repo.Corporation("00000001", "테스트", None),
+        disclosure_repo.Corporation("00000002", "테스트", "123456"),
+    ]
+
+    resolved = await client.resolve_corporation("테스트")
+
+    assert resolved.corp_code == "00000002"
+    assert resolved.stock_code == "123456"
 
 
 @pytest.mark.asyncio

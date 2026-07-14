@@ -50,7 +50,12 @@ def _build_state(request: ChatRequest) -> dict:
     return state
 
 
-def _one_stock_payload(price: dict | None, news: list, disclosures: list) -> dict:
+def _one_stock_payload(
+    price: dict | None,
+    news: list,
+    disclosures: list,
+    disclosure_error: str | None = None,
+) -> dict:
     """단일 종목의 시세·뉴스·공시를 프론트 패널 형태로 정리한다."""
     price = price or {}
     fundamentals = price.get("fundamentals") or None
@@ -91,6 +96,7 @@ def _one_stock_payload(price: dict | None, news: list, disclosures: list) -> dic
             }
             for d in (disclosures or [])[:8]
         ],
+        "disclosure_error": disclosure_error,
     }
 
 
@@ -100,6 +106,7 @@ def _tool_payload(node_output: dict) -> dict:
         node_output.get("price_data"),
         node_output.get("news_items") or [],
         node_output.get("disclosures") or [],
+        node_output.get("disclosure_error"),
     )
     payload["panel_update"] = node_output.get("panel_update", True)
     payload["is_followup"] = bool(node_output.get("is_followup"))
@@ -109,7 +116,12 @@ def _tool_payload(node_output: dict) -> dict:
     panels = node_output.get("screener_panels") or []
     if panels:
         payload["stocks"] = [
-            _one_stock_payload(p.get("price"), p.get("news") or [], p.get("disclosures") or [])
+            _one_stock_payload(
+                p.get("price"),
+                p.get("news") or [],
+                p.get("disclosures") or [],
+                p.get("disclosure_error"),
+            )
             for p in panels
         ]
     return payload
@@ -220,6 +232,7 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
                                         panel.get("price"),
                                         panel.get("news") or [],
                                         panel.get("disclosures") or [],
+                                        panel.get("disclosure_error"),
                                     )
                                 ]
                             },

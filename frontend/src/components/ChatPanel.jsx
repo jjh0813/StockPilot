@@ -136,10 +136,20 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
               tr.stocks.forEach((s) => {
                 if (!s || !s.price) return
                 const sNews = Array.isArray(s.news) ? s.news.filter((n) => n && n.url) : []
-                onInsight?.({ price: s.price, news: sNews, disclosures: s.disclosures || [] })
+                onInsight?.({
+                  price: s.price,
+                  news: sNews,
+                  disclosures: s.disclosures || [],
+                  disclosureError: s.disclosure_error || '',
+                })
               })
             } else if (shouldUpdatePanel && tr.price) {
-              onInsight?.({ price: tr.price, news, disclosures })
+              onInsight?.({
+                price: tr.price,
+                news,
+                disclosures,
+                disclosureError: tr.disclosure_error || '',
+              })
             }
           } else if (e.type === 'token') {
             patchLastAssistant((m) => ({ status: 'streaming', answer: (m.answer || '') + (e.content || '') }))

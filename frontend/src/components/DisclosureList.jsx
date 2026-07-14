@@ -4,7 +4,7 @@ function formatDate(d) {
   return d
 }
 
-function DisclosureList({ disclosures }) {
+function DisclosureList({ disclosures, error }) {
   const items = disclosures || []
 
   return (
@@ -15,7 +15,9 @@ function DisclosureList({ disclosures }) {
       </div>
       {items.length === 0 ? (
         <p className="py-3 text-sm text-neutral-500">
-          최근 공시를 찾지 못했어요.
+          {error
+            ? '공시 조회가 지연돼 이번 응답에는 생략됐어요. 잠시 뒤 다시 물어보면 캐시된 결과로 더 빨라질 수 있어요.'
+            : '최근 공시를 찾지 못했어요.'}
         </p>
       ) : (
         <ul className="no-scrollbar flex max-h-40 flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1">

@@ -414,17 +414,26 @@ async def tool_node(state: StockPilotState) -> dict:
     ticker = state.get("ticker") or ""
     if state.get("tool_mode") == "disclosure":
         disclosures: list[dict] = []
+        disclosure_error = None
         if ticker:
             try:
                 disc = await _executor.execute("get_disclosure", {"ticker": ticker})
-                disclosures = (disc.get("data") or {}).get("disclosures", []) or []
-            except Exception:
+                if disc.get("success"):
+                    disclosures = (disc.get("data") or {}).get("disclosures", []) or []
+                else:
+                    disclosure_error = disc.get("error") or "공시 조회에 실패했습니다."
+            except Exception as exc:
+                disclosure_error = str(exc)
                 logger.warning("공시 수집 실패 — 공시 없이 진행")
         logger.info(f"🔧 [Tool] 공시 전용 수집 완료 | 공시 {len(disclosures)}건")
         return {
             "ticker": ticker,
             "disclosures": disclosures,
-            "tool_result": {"disclosures": disclosures},
+            "disclosure_error": disclosure_error,
+            "tool_result": {
+                "disclosures": disclosures,
+                "disclosure_error": disclosure_error,
+            },
             "tool_name": "get_disclosure",
             "tool_mode": "disclosure",
         }
@@ -473,10 +482,12 @@ async def tool_node(state: StockPilotState) -> dict:
 
     # 4번째 도구: 공시(DART). 자격 증명이 없거나 실패해도 분석은 계속 진행한다.
     disclosures: list[dict] = []
+    disclosure_error = None
     if disc.get("success"):
         disclosures = (disc.get("data") or {}).get("disclosures", []) or []
     else:
-        logger.warning(f"공시 수집 실패 — 공시 없이 진행: {disc.get('error')}")
+        disclosure_error = disc.get("error") or "공시 조회에 실패했습니다."
+        logger.warning(f"공시 수집 실패 — 공시 없이 진행: {disclosure_error}")
 
     logger.info(
         f"🔧 [Tool] 수집 완료 | 뉴스 {len(news_items)}건 | 공시 {len(disclosures)}건"
@@ -485,6 +496,7 @@ async def tool_node(state: StockPilotState) -> dict:
         "price_data": price.get("data"),
         "news_items": news_items,
         "disclosures": disclosures,
+        "disclosure_error": disclosure_error,
         "direction_notice": direction_notice,
         "is_followup": is_followup,
         "panel_update": not is_followup,
@@ -492,6 +504,7 @@ async def tool_node(state: StockPilotState) -> dict:
             "price": price.get("data"),
             "news": news_items,
             "disclosures": disclosures,
+            "disclosure_error": disclosure_error,
             "direction_notice": direction_notice,
             "is_followup": is_followup,
             "panel_update": not is_followup,

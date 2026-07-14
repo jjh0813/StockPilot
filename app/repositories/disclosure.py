@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import re
 import threading
@@ -16,6 +17,7 @@ from xml.etree import ElementTree
 
 import httpx
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+from loguru import logger
 
 from app.core.config import settings
 
@@ -35,6 +37,8 @@ class Corporation:
 
 
 _corporation_cache: list[Corporation] | None = None
+_corporation_cache_task: asyncio.Task[list[Corporation]] | None = None
+_CORPORATION_CACHE_TASK_LOCK = threading.Lock()
 _DISCLOSURE_CACHE_TTL_SECONDS = 300
 _DISCLOSURE_CACHE_LOCK = threading.Lock()
 _DISCLOSURE_CACHE: dict[tuple[str, int], tuple[float, list[dict]]] = {}
@@ -43,6 +47,7 @@ _KNOWN_CORPORATIONS = [
     Corporation("00126380", "삼성전자", "005930"),
     Corporation("00164779", "SK하이닉스", "000660"),
     Corporation("00111704", "한화오션", "042660"),
+    Corporation("00413046", "셀트리온", "068270"),
     Corporation("00266961", "NAVER", "035420"),
     Corporation("00258801", "카카오", "035720"),
 ]
@@ -53,7 +58,8 @@ _KNOWN_CORPORATION_ALIASES: dict[str, Corporation] = {
     "sk하이닉스": _KNOWN_CORPORATIONS[1],
     "대우조선해양": _KNOWN_CORPORATIONS[2],
     "한화오션주": _KNOWN_CORPORATIONS[2],
-    "네이버": _KNOWN_CORPORATIONS[3],
+    "셀트리온주": _KNOWN_CORPORATIONS[3],
+    "네이버": _KNOWN_CORPORATIONS[4],
 }
 
 
@@ -89,10 +95,18 @@ class DartClient:
         if self._corporations is None and _corporation_cache is not None:
             self._corporations = _corporation_cache
         if self._corporations is None:
-            response = await self._get("/corpCode.xml", {})
-            self._corporations = parse_corporation_archive(response.content)
+            if self._client is not None:
+                self._corporations = await self._download_corporations()
+            else:
+                self._corporations = await _get_shared_corporation_cache(self)
             _corporation_cache = self._corporations
         return self._corporations
+
+    async def _download_corporations(self) -> list[Corporation]:
+        response = await self._get("/corpCode.xml", {})
+        corporations = parse_corporation_archive(response.content)
+        logger.info(f"DART 기업 고유번호 목록 적재 완료: {len(corporations)}개")
+        return corporations
 
     async def resolve_corporation(self, query: str) -> Corporation:
         known = _lookup_known_corporation(query)
@@ -109,7 +123,7 @@ class DartClient:
             or _normalize_company_name(corporation.corp_name) == normalized
         ]
         if exact:
-            return exact[0]
+            return _prefer_listed_corporation(exact)
 
         partial = [
             corporation
@@ -119,7 +133,13 @@ class DartClient:
         if len(partial) == 1:
             return partial[0]
         if partial:
-            candidates = ", ".join(item.corp_name for item in partial[:5])
+            listed = [item for item in partial if item.stock_code]
+            if len(listed) == 1:
+                return listed[0]
+            candidates = ", ".join(
+                f"{item.corp_name}({item.stock_code or item.corp_code})"
+                for item in partial[:5]
+            )
             raise DartAPIError(f"회사명이 모호합니다. 후보: {candidates}")
         raise DartAPIError(f"회사를 찾지 못했습니다: {query}")
 
@@ -195,6 +215,72 @@ async def get_recent_disclosures(corp: str, limit: int = 10) -> list[dict]:
     ]
     _set_cached_disclosures(cache_key, result)
     return result
+
+
+async def _get_shared_corporation_cache(client: DartClient) -> list[Corporation]:
+    """Share the expensive corpCode.xml download across concurrent requests.
+
+    If a user request times out while the download is in progress, asyncio.shield keeps
+    the shared task alive so the next request can reuse the completed cache instead of
+    starting the same heavy OpenDART call again.
+    """
+
+    global _corporation_cache, _corporation_cache_task
+    if _corporation_cache is not None:
+        return _corporation_cache
+
+    current_loop = asyncio.get_running_loop()
+    with _CORPORATION_CACHE_TASK_LOCK:
+        task = _corporation_cache_task
+        needs_new_task = (
+            task is None
+            or task.cancelled()
+            or task.get_loop() is not current_loop
+            or (task.done() and task.exception() is not None)
+        )
+        if needs_new_task:
+            task = asyncio.create_task(client._download_corporations())
+            _corporation_cache_task = task
+
+    try:
+        corporations = await asyncio.shield(task)
+    except Exception:
+        with _CORPORATION_CACHE_TASK_LOCK:
+            if _corporation_cache_task is task:
+                _corporation_cache_task = None
+        raise
+
+    _corporation_cache = corporations
+    return corporations
+
+
+def start_corporation_cache_warmup() -> None:
+    """Start a non-blocking OpenDART corporation-code warmup at API boot."""
+
+    if not settings.dart_api_key or _corporation_cache is not None:
+        return
+
+    async def _warmup() -> None:
+        try:
+            client = DartClient(settings.dart_api_key)
+            await client.get_corporations()
+        except Exception as exc:
+            logger.warning(
+                f"DART 기업 고유번호 목록 사전 적재 실패: {type(exc).__name__}: {exc}"
+            )
+
+    try:
+        asyncio.get_running_loop().create_task(_warmup())
+        logger.info("DART 기업 고유번호 목록 사전 적재 시작")
+    except RuntimeError:
+        return
+
+
+def _prefer_listed_corporation(corporations: list[Corporation]) -> Corporation:
+    listed = [corporation for corporation in corporations if corporation.stock_code]
+    if listed:
+        return listed[0]
+    return corporations[0]
 
 
 def _get_cached_disclosures(cache_key: tuple[str, int]) -> list[dict] | None:

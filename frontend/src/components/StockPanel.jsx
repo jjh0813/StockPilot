@@ -21,7 +21,7 @@ function formatPct(p) {
   return { text: `― ${a}%`, cls: 'text-neutral-300' }
 }
 
-function StockPanel({ price, news, disclosures }) {
+function StockPanel({ price, news, disclosures, disclosureError }) {
   if (!price) return null
   const pct = formatPct(price.change_pct)
 
@@ -55,7 +55,7 @@ function StockPanel({ price, news, disclosures }) {
       {/* 아래: 공시정보 */}
       <BorderGlow {...GLOW} borderRadius={24}>
         <div className="px-6 py-4">
-          <DisclosureList disclosures={disclosures} />
+          <DisclosureList disclosures={disclosures} error={disclosureError} />
         </div>
       </BorderGlow>
     </div>

@@ -248,6 +248,7 @@ function App() {
                         price={ins.price}
                         news={ins.news}
                         disclosures={ins.disclosures}
+                        disclosureError={ins.disclosureError}
                       />
                     ))}
                   </div>
