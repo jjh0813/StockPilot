@@ -495,6 +495,24 @@
     "source_url": "https://kind.krx.co.kr"
   },
   {
+    "term": "호재",
+    "aliases": ["긍정 이슈", "Good News", "Positive Catalyst"],
+    "definition": "주가나 기업 가치에 긍정적으로 작용할 수 있는 뉴스, 공시, 실적, 정책, 산업 변화 등을 말합니다. 다만 호재가 있다고 해서 주가 상승이 보장되는 것은 아니며, 이미 가격에 반영됐을 수도 있습니다.",
+    "example": "대규모 수주, 실적 개선, 신제품 출시, 규제 완화 같은 소식은 종목에 따라 호재로 해석될 수 있습니다.",
+    "category": "market",
+    "difficulty": "beginner",
+    "source_url": "https://kind.krx.co.kr"
+  },
+  {
+    "term": "악재",
+    "aliases": ["부정 이슈", "Bad News", "Negative Catalyst"],
+    "definition": "주가나 기업 가치에 부정적으로 작용할 수 있는 뉴스, 공시, 실적 부진, 규제, 소송, 산업 둔화 등을 말합니다. 악재 역시 영향 정도와 반영 여부를 함께 확인해야 합니다.",
+    "example": "실적 쇼크, 대규모 리콜, 규제 강화, 주요 계약 해지 같은 소식은 종목에 따라 악재로 해석될 수 있습니다.",
+    "category": "market",
+    "difficulty": "beginner",
+    "source_url": "https://kind.krx.co.kr"
+  },
+  {
     "term": "목표주가",
     "aliases": ["목표가", "Target Price"],
     "definition": "증권사나 애널리스트가 기업 분석을 바탕으로 제시하는 일정 기간 후의 예상 주가 수준입니다. 실제 주가를 보장하거나 매수·매도 신호를 뜻하는 것은 아니며, 가정과 분석 방법에 따라 달라질 수 있습니다.",
