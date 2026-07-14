@@ -428,9 +428,9 @@ def _format_change(change_pct: float | None) -> tuple[str, str]:
 def _requested_direction_from_text(text: str) -> str:
     """사용자가 질문에서 명시한 상승/하락 방향을 추출한다."""
 
-    if any(keyword in text for keyword in ("떨어", "하락", "급락", "약세", "악재", "나쁜 뉴스", "부정 뉴스")):
+    if any(keyword in text for keyword in ("떨어", "내렸", "내림", "하락", "급락", "약세", "악재", "나쁜 뉴스", "부정 뉴스")):
         return "down"
-    if any(keyword in text for keyword in ("올라", "상승", "급등", "강세", "호재", "좋은 뉴스", "긍정 뉴스")):
+    if any(keyword in text for keyword in ("올라", "올랐", "오름", "상승", "급등", "강세", "호재", "좋은 뉴스", "긍정 뉴스")):
         return "up"
     return "neutral"
 
