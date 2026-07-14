@@ -134,6 +134,10 @@ async def test_executor_connects_disclosure_repository(monkeypatch):
     DisclosureResult.model_validate(result)
 
 
+def test_disclosure_tool_has_budget_for_unknown_corporation_lookup():
+    assert executor_module.TOOL_TIMEOUT_SECONDS["get_disclosure"] >= 45
+
+
 async def test_executor_connects_watchlist_repository(monkeypatch):
     async def fake_resolve_ticker(ticker: str):
         return "005930"

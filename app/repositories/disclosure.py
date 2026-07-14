@@ -20,6 +20,7 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from app.core.config import settings
 
 DART_API_BASE = "https://opendart.fss.or.kr/api"
+DART_HTTP_TIMEOUT_SECONDS = 45.0
 
 
 class DartAPIError(RuntimeError):
@@ -76,7 +77,7 @@ class DartClient:
         else:
             async with httpx.AsyncClient(
                 base_url=DART_API_BASE,
-                timeout=30,
+                timeout=DART_HTTP_TIMEOUT_SECONDS,
             ) as client:
                 response = await client.get(path, params=request_params)
         response.raise_for_status()

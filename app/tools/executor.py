@@ -43,7 +43,9 @@ DEFAULT_UNIVERSE = [
 TOOL_TIMEOUT_SECONDS = {
     "get_stock_price": 20,
     "get_news": 25,
-    "get_disclosure": 15,
+    # 매핑되지 않은 종목은 최초 1회 OpenDART corpCode.xml 전체 목록을 받아야 한다.
+    # GCE/IAP 배포 환경에서는 15초를 넘길 수 있어, 공시 도구만 넉넉하게 둔다.
+    "get_disclosure": 60,
     "find_positive_news_stocks": 35,
     "add_watchlist": 15,
     "lookup_glossary_term": 10,
