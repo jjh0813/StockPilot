@@ -285,6 +285,55 @@ async def test_response_node_overview_keeps_header_but_avoids_reason_analysis():
     assert "원인 분석" not in content
 
 
+async def test_response_node_overview_separates_trend_from_daily_move():
+    rows = []
+    closes = [
+        100000,
+        98000,
+        96000,
+        94000,
+        92000,
+        90000,
+        88000,
+        86000,
+        84000,
+        82000,
+        80000,
+        80500,
+    ]
+    for idx, close in enumerate(closes, start=1):
+        rows.append(
+            {
+                "date": f"2026-07-{idx:02d}",
+                "open": close,
+                "high": close,
+                "low": close,
+                "close": close,
+                "volume": 1000,
+                "change_pct": 0.0,
+            }
+        )
+
+    state = create_initial_state("overview-mixed")
+    state["intent"] = "tool"
+    state["ticker"] = "삼성전자"
+    state["price_data"] = {
+        **stock_snapshot(),
+        "ohlcv": rows,
+        "current_price": 80500,
+        "change_pct": 0.63,
+        "snapshot_at": "2026-07-12T01:30:00+00:00",
+    }
+    state["messages"] = [HumanMessage(content="삼성전자 요즘 어때?")]
+
+    result = await response_node(state)
+    content = result["messages"][-1].content
+
+    assert "최근 12거래일 흐름은 하락 추세지만" in content
+    assert "기준일 하루 움직임은 전 거래일 대비 상승" in content
+    assert "왜 올랐어?" in content
+
+
 async def test_tool_node_reuses_session_price_for_followup(monkeypatch):
     _SESSION_PRICE_SNAPSHOT.clear()
     calls = {"price": 0}

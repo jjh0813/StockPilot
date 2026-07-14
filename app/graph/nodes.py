@@ -634,6 +634,44 @@ def _recent_trend_from_ohlcv(ohlcv: list[dict]) -> tuple[str, float | None]:
     return "최근에는 큰 방향성 없이 오르내리는 흐름입니다", delta
 
 
+def _direction_from_delta(delta: float | None) -> str:
+    if delta is None:
+        return "unknown"
+    if delta >= 3:
+        return "up"
+    if delta <= -3:
+        return "down"
+    return "neutral"
+
+
+def _overview_lead_sentence(name: str, period: str, trend_text: str, trend_pct: float | None, change_pct: float | None) -> str:
+    trend_direction = _direction_from_delta(trend_pct)
+    daily_direction = _actual_direction_from_change(change_pct)
+    subject = _topic_subject(name)
+
+    if trend_direction in {"up", "down"} and daily_direction in {"up", "down"}:
+        trend_word = "상승" if trend_direction == "up" else "하락"
+        daily_word = "상승" if daily_direction == "up" else "하락"
+        if trend_direction != daily_direction:
+            return (
+                f"{subject} 일봉 기준 {period} 흐름은 {trend_word} 추세지만, "
+                f"기준일 하루 움직임은 전 거래일 대비 {daily_word}입니다."
+            )
+        return (
+            f"{subject} 일봉 기준 {period} 흐름과 기준일 하루 움직임 모두 "
+            f"{daily_word} 쪽입니다."
+        )
+
+    if daily_direction in {"up", "down"}:
+        daily_word = "상승" if daily_direction == "up" else "하락"
+        return (
+            f"{subject} 일봉 기준 {period} 차트에서는 {trend_text}. "
+            f"기준일 하루 움직임은 전 거래일 대비 {daily_word}입니다."
+        )
+
+    return f"{subject} 일봉 기준, {period} 차트로 보면 {trend_text}."
+
+
 def _market_overview_answer(price: dict) -> str:
     """단순 현황 질문에는 원인 분석 대신 기준이 분명한 요약을 반환한다."""
 
@@ -647,7 +685,7 @@ def _market_overview_answer(price: dict) -> str:
     snapshot_at = _format_datetime_kst(price.get("snapshot_at"))
 
     lines = [
-        f"{_topic_subject(name)} 일봉 기준, {period} 차트로 보면 {trend_text}.",
+        _overview_lead_sentence(name, period, trend_text, trend_pct, change_pct),
         "",
         f"기준일: {as_of} · 조회시각: {snapshot_at}",
     ]
