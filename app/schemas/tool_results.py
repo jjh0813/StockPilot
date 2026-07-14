@@ -121,6 +121,7 @@ class PositiveNewsStock(ToolResultModel):
     ticker: str
     positive_score: Number
     evidence_count: int
+    change_pct: Number | None = None
     top_news: str
     url: str
     news: list[NewsItem] | None = None

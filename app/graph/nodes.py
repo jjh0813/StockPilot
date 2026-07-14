@@ -515,18 +515,52 @@ def _tool_context(price: dict, news_items: list[dict], direction_notice: str | N
     return "\n".join(lines)
 
 
+async def fetch_screener_panel(stock: dict) -> dict | None:
+    """스크리너 종목 1개의 시세·뉴스·공시를 순차로 조회한다(실패 시 None).
+
+    라우트에서 종목을 하나씩 호출해 완성되는 대로 프론트에 스트리밍한다.
+    tool_node에서 한꺼번에 선조회하면 지연이 커서(팀원 최적화) 라우트에서 순차 처리한다.
+    """
+    name = (stock or {}).get("ticker") or ""
+    if not name:
+        return None
+    try:
+        price = await _executor.execute("get_stock_price", {"ticker": name})
+    except Exception:
+        logger.warning(f"스크리너 패널 시세 실패: {name}")
+        return None
+    price_data = price.get("data")
+    if not price_data:
+        return None
+    try:
+        news = await _executor.execute("get_news", {"company": name, "direction": "up"})
+        news_items = [tag_session(item) for item in news.get("data", {}).get("news", [])]
+    except Exception:
+        news_items = []
+    disclosures: list[dict] = []
+    try:
+        query = (price_data or {}).get("ticker") or name
+        disc = await _executor.execute("get_disclosure", {"ticker": query})
+        disclosures = (disc.get("data") or {}).get("disclosures", []) or []
+    except Exception:
+        disclosures = []
+    return {"price": price_data, "news": news_items, "disclosures": disclosures}
+
+
 def _format_screener(stocks: list[dict]) -> str:
     """스크리너 결과를 목록 형태 답변으로 만든다."""
     if not stocks:
         return (
-            "최근 상승 근거가 뚜렷한 종목을 찾지 못했어요.\n\n"
+            "지금 상승 중인 종목을 찾지 못했어요.\n\n"
             "※ 투자 자문이 아닌 참고용 정보입니다."
         )
-    lines = ["### 📈 최근 상승 이슈가 뚜렷한 종목", ""]
-    for s in stocks[:5]:
+    lines = ["### 📈 최근 상승률 상위 종목", ""]
+    for s in stocks[:6]:
         name = s.get("ticker", "")
         top = s.get("top_news") or "관련 이슈"
-        lines.append(f"- **{name}** — {top}")
+        chg = s.get("change_pct")
+        badge = f" (▲{chg:.2f}%)" if isinstance(chg, (int, float)) and chg > 0 else ""
+        lines.append(f"- **{name}**{badge} — {top}")
     lines.append("")
     lines.append("※ 상승 근거 뉴스 기준이며, 투자 자문이 아닌 참고용 정보입니다.")
     return "\n".join(lines)

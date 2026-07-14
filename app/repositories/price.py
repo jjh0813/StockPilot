@@ -221,6 +221,35 @@ async def get_fundamentals(
     return result
 
 
+async def get_change_pct(ticker: str) -> float | None:
+    """랭킹용 경량 등락률 조회 — 재무지표·장기 일봉 없이 최근 등락률만 반환.
+
+    스크리너에서 다수 종목을 빠르게 정렬하려고 쓴다. 무거운 get_stock_snapshot
+    (3개월 일봉 + 재무지표)을 유니버스 전체에 돌리면 타임아웃이 나서 분리했다.
+    """
+    try:
+        code = await resolve_ticker(ticker)
+    except Exception:
+        return None
+    end_date = date.today()
+    start_date = end_date - timedelta(days=10)
+    try:
+        ohlcv = await get_ohlcv(code, start_date.isoformat(), end_date.isoformat())
+    except Exception:
+        return None
+    if not ohlcv:
+        return None
+    latest = ohlcv[-1]
+    change_pct = _coerce_pct(latest.get("change_pct"))
+    if change_pct is None:
+        previous = ohlcv[-2] if len(ohlcv) > 1 else None
+        current_close = latest.get("close")
+        previous_close = previous.get("close") if previous else None
+        if current_close is not None and previous_close not in (None, 0):
+            change_pct = round((current_close - previous_close) / previous_close * 100, 2)
+    return change_pct
+
+
 async def get_stock_snapshot(
     ticker: str,
     *,

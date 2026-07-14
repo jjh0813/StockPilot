@@ -8,6 +8,7 @@ from loguru import logger
 
 from app.core.guardrails import GuardrailViolation, ensure_safe_user_input
 from app.graph.graph import get_stockpilot_graph
+from app.graph.nodes import fetch_screener_panel
 from app.core.observability import langfuse_config
 from app.graph.state import create_initial_state
 from app.repositories.glossary import find_terms_in_text, list_all_terms
@@ -193,6 +194,26 @@ async def _stream_events(request: ChatRequest) -> AsyncIterator[str]:
                         tool_name=tool_used,
                         tool_result=_tool_payload(node_output),
                     ).to_sse()
+                    # 급등 스크리너: 종목을 하나씩 순차 조회해 완성되는 대로 개별 패널 전송
+                    # (tool_node는 속도를 위해 패널을 선조회하지 않음 → 라우트에서 스트리밍)
+                    for stock in (node_output.get("screener_results") or [])[:6]:
+                        panel = await fetch_screener_panel(stock)
+                        if not panel:
+                            continue
+                        yield StreamEvent(
+                            type="tool",
+                            node="tool",
+                            tool_name="screener_panel",
+                            tool_result={
+                                "stocks": [
+                                    _one_stock_payload(
+                                        panel.get("price"),
+                                        panel.get("news") or [],
+                                        panel.get("disclosures") or [],
+                                    )
+                                ]
+                            },
+                        ).to_sse()
                 # 토큰 스트리밍이 안 된 경우(폴백)에만 최종 답을 한 번에 전송
                 if node_name == "response":
                     used_model = node_output.get("used_model") or used_model

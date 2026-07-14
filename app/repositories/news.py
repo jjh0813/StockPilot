@@ -137,6 +137,28 @@ class NaverNewsAPIError(RuntimeError):
     """네이버 뉴스 API 호출 실패."""
 
 
+# ── 네이버 뉴스 API 동시호출 제한 + 429 재시도 (병렬 유지하되 Rate limit 방어) ──
+_NAVER_SEMAPHORE = asyncio.Semaphore(5)
+_NAVER_MAX_RETRIES = 3
+
+
+async def _naver_get(http_client, headers, params):
+    """동시호출 제한 + 429 백오프 재시도로 네이버 뉴스 API를 호출한다."""
+    response = None
+    for attempt in range(1, _NAVER_MAX_RETRIES + 1):
+        async with _NAVER_SEMAPHORE:
+            response = await http_client.get(NAVER_NEWS_URL, headers=headers, params=params)
+        if response.status_code != 429:
+            return response
+        if attempt < _NAVER_MAX_RETRIES:
+            logger.warning(
+                f"네이버 뉴스 429(Rate limit) — {0.5 * attempt:.1f}s 후 재시도 "
+                f"({attempt}/{_NAVER_MAX_RETRIES})"
+            )
+            await asyncio.sleep(0.5 * attempt)
+    return response
+
+
 async def search_news(
     query: str,
     display: int = 30,
@@ -170,13 +192,9 @@ async def search_news(
 
     if client is None:
         async with httpx.AsyncClient(timeout=15.0) as http_client:
-            response = await http_client.get(
-                NAVER_NEWS_URL,
-                headers=headers,
-                params=params,
-            )
+            response = await _naver_get(http_client, headers, params)
     else:
-        response = await client.get(NAVER_NEWS_URL, headers=headers, params=params)
+        response = await _naver_get(client, headers, params)
 
     if response.status_code != 200:
         try:
@@ -246,10 +264,10 @@ def rule_filter(
         )
 
         score = 0
-        exact_title_match = bool(company_key and company_key in title_key)
+        exact_title_match = bool(company_key and company_key in title_key) and not _preferred_only_match(company_key, title_key)
         description_company_match = bool(
             company_key and company_key in description_key
-        )
+        ) and not _preferred_only_match(company_key, description_key)
         direct_company_match = exact_title_match
         market_context_match = any(
             keyword.lower() in title.lower() for keyword in _MARKET_CONTEXT_KEYWORDS
@@ -331,6 +349,7 @@ async def get_stock_issue_news(
     days: int = 7,
     limit: int = 15,
     display: int = 50,
+    max_queries: int = 3,
     client: httpx.AsyncClient | None = None,
 ) -> list[dict[str, Any]]:
     """주가 방향과 관련 있어 보이는 최신 뉴스 후보를 우선순위화합니다."""
@@ -345,6 +364,7 @@ async def get_stock_issue_news(
         "neutral": "실적",
     }[direction]
     queries = [company, f"{company} 주가", f"{company} {direction_query}"]
+    queries = queries[: max(1, max_queries)]
 
     async def _search_with_client(http_client: httpx.AsyncClient | None):
         return await asyncio.gather(
@@ -457,6 +477,26 @@ def _clean_html(value: str) -> str:
 
 def _compact(value: str) -> str:
     return re.sub(r"\s+", "", value).lower()
+
+
+def _preferred_only_match(name_key: str, text_key: str) -> bool:
+    """text_key 안에서 종목명이 전부 '종목명+우'(우선주) 형태로만 등장하면 True.
+
+    보통주(예: 삼성전자)가 우선주(삼성전자우) 기사에 잘못 매칭되는 것을 막는다.
+    보통주가 정상 형태로 한 번이라도 등장하면 False(정상 매칭 인정).
+    """
+    if not name_key or name_key.endswith("우") or name_key not in text_key:
+        return False
+    start = 0
+    while True:
+        idx = text_key.find(name_key, start)
+        if idx < 0:
+            break
+        after = text_key[idx + len(name_key): idx + len(name_key) + 1]
+        if after != "우":
+            return False
+        start = idx + 1
+    return True
 
 
 def _canonical_url(value: str) -> str:
