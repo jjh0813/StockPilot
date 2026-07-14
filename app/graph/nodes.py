@@ -428,11 +428,35 @@ def _format_change(change_pct: float | None) -> tuple[str, str]:
 def _requested_direction_from_text(text: str) -> str:
     """사용자가 질문에서 명시한 상승/하락 방향을 추출한다."""
 
-    if any(keyword in text for keyword in ("떨어", "내렸", "내림", "하락", "급락", "약세", "악재", "나쁜 뉴스", "부정 뉴스")):
-        return "down"
-    if any(keyword in text for keyword in ("올라", "올랐", "오름", "상승", "급등", "강세", "호재", "좋은 뉴스", "긍정 뉴스")):
-        return "up"
-    return "neutral"
+    focus = text.rsplit("왜", 1)[-1] if "왜" in text else text
+    return _last_direction_mention(focus) or _last_direction_mention(text) or "neutral"
+
+
+def _last_direction_mention(text: str) -> str | None:
+    """문장 안에서 마지막으로 언급된 상승/하락 방향을 반환한다."""
+
+    direction_keywords = {
+        "down": (
+            "떨어", "떨어졌", "떨어지", "내려", "내려가", "내렸", "내림",
+            "빠졌", "빠지", "빠져", "밀렸", "밀리", "하락", "급락", "약세",
+            "악재", "나쁜 뉴스", "부정 뉴스",
+        ),
+        "up": (
+            "올라", "올랐", "오르", "오른", "오름", "뛰었", "뛰어",
+            "상승", "급등", "강세", "호재", "좋은 뉴스", "긍정 뉴스",
+        ),
+    }
+    matches: list[tuple[int, str]] = []
+    for direction, keywords in direction_keywords.items():
+        for keyword in keywords:
+            index = text.find(keyword)
+            while index != -1:
+                matches.append((index, direction))
+                index = text.find(keyword, index + len(keyword))
+
+    if not matches:
+        return None
+    return max(matches, key=lambda item: item[0])[1]
 
 
 def _actual_direction_from_change(change_pct: float | None) -> str:

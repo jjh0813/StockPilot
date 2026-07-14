@@ -314,6 +314,72 @@ async def test_tool_node_corrects_requested_up_when_actual_price_is_down(monkeyp
     assert "상승 원인 대신 최근 하락" in result["direction_notice"]
 
 
+async def test_tool_node_uses_direction_after_why_for_conflicting_user_wording(monkeypatch):
+    async def fake_execute(tool_name, tool_args=None, session_id="default"):
+        if tool_name == "get_stock_price":
+            return {
+                "success": True,
+                "data": {
+                    **stock_snapshot(),
+                    "name": "삼성전자",
+                    "change_pct": -0.69,
+                },
+            }
+        if tool_name == "get_news":
+            assert tool_args["direction"] == "down"
+            return {"success": True, "data": {"news": [directional_news_item()]}}
+        if tool_name == "get_disclosure":
+            return {"success": True, "data": {"disclosures": []}}
+        raise AssertionError(f"unexpected tool: {tool_name}")
+
+    monkeypatch.setattr("app.graph.nodes._executor.execute", fake_execute)
+
+    state = create_initial_state("direction-conflicting-wording")
+    state["ticker"] = "삼성전자"
+    state["messages"] = [HumanMessage(content="내려가고 있는데 왜 올라가?")]
+
+    result = await tool_node(state)
+
+    assert "상승 원인 대신 최근 하락" in result["direction_notice"]
+
+
+async def test_tool_node_corrects_falling_premise_when_actual_price_is_up(monkeypatch):
+    async def fake_execute(tool_name, tool_args=None, session_id="default"):
+        if tool_name == "get_stock_price":
+            return {
+                "success": True,
+                "data": {
+                    **stock_snapshot(),
+                    "name": "삼성전자",
+                    "change_pct": 1.18,
+                },
+            }
+        if tool_name == "get_news":
+            assert tool_args["direction"] == "up"
+            item = directional_news_item()
+            item.update(
+                {
+                    "direction": "up",
+                    "direction_keywords": ["상승", "호재"],
+                    "has_direction_evidence": True,
+                }
+            )
+            return {"success": True, "data": {"news": [item]}}
+        if tool_name == "get_disclosure":
+            return {"success": True, "data": {"disclosures": []}}
+        raise AssertionError(f"unexpected tool: {tool_name}")
+
+    monkeypatch.setattr("app.graph.nodes._executor.execute", fake_execute)
+
+    state = create_initial_state("direction-rising-actual")
+    state["ticker"] = "삼성전자"
+    state["messages"] = [HumanMessage(content="오르고 있는데 왜 떨어져?")]
+
+    result = await tool_node(state)
+
+    assert "하락 원인 대신 최근 상승" in result["direction_notice"]
+
+
 async def test_response_node_prepends_direction_notice_when_llm_omits_it(monkeypatch):
     class FakeResult:
         message = type("Message", (), {"content": "삼성전자 ▲ 1.77% 상승\n\n원인 분석"})()
