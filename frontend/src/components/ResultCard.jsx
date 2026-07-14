@@ -4,10 +4,10 @@ function responseMetaLabel(m) {
   if (!m) return ''
   let s = String(m)
   if (s.includes('/')) s = s.split('/').pop()   // gemini/gemini-2.0-flash → gemini-2.0-flash
-  if (s === 'template-market-overview') return '요즘 흐름 요약'
-  if (s === 'template-direction-correction') return '방향 보정 요약'
+  if (s === 'template-market-overview') return 'StockPilot 요약 엔진'
+  if (s === 'template-direction-correction') return 'StockPilot 방향 보정 엔진'
   if (s === 'template-fallback') return '기본 템플릿(오프라인 폴백)'
-  if (s.toLowerCase().includes('template')) return '안전 요약 템플릿'
+  if (s.toLowerCase().includes('template')) return 'StockPilot 안전 응답 엔진'
   return s
 }
 
@@ -16,9 +16,9 @@ function responseMetaText(m) {
   if (!label) return ''
   const value = String(m || '').toLowerCase()
   if (value.includes('template')) {
-    return `이 응답은 ${label}으로 생성되었습니다`
+    return `사용 엔진: ${label}`
   }
-  return `이 응답에는 ${label}가 사용되었습니다`
+  return `사용 모델: ${label}`
 }
 
 function formatPct(p) {
