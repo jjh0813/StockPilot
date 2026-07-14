@@ -1,33 +1,40 @@
-# 스톡파일럿 (Stock Pilot)
+# 스톡파일럿 (StockPilot)
 
-> 종목을 검색하면 뉴스·공시를 AI가 분석해 **"지금 이 종목에 무슨 일이 있는지"** 설명해주는 국내 주식 리서치 어시스턴트
+> 종목을 검색하면 뉴스·공시를 AI가 분석해 **"지금 이 종목에 무슨 일이 있는지"** 를 근거·출처와 함께 설명해주는 국내 주식 리서치 어시스턴트
 
-가천대 AI 부트캠프 · 생성형 AI 고급과정 프로젝트입니다. 초보 투자자를 위해 흩어진 정보(시세·공시·뉴스)를 한 번의 질문으로 모아, 종목의 최근 등락률을 크게 보여주고, 그 등락의 원인을 뉴스·공시에서 찾아 근거·출처와 함께 설명합니다. 토스증권 'AI 시그널'을 벤치마크로, 루미 에이전트에서 쓴 스택(LangGraph · Solar · FastAPI · SSE)을 그대로 활용해 구현합니다.
+가천대 AI 부트캠프 · 생성형 AI 고급과정 프로젝트입니다. 초보 투자자를 위해 흩어진 정보(시세·뉴스·공시·재무·투자용어)를 한 번의 질문으로 모아, 종목의 최근 등락률을 크게 보여주고 그 등락의 원인을 뉴스·공시에서 찾아 설명합니다. LangGraph · Solar · FastAPI · SSE 스택으로 구현했습니다.
 
-> ⚠️ 이 서비스는 투자 자문이 아니라 공개 데이터를 모아 이해를 돕는 참고용 도구입니다. 매수·매도 추천이나 주가 예측은 하지 않으며, 가격 변동의 원인도 '단정'이 아니라 관련 이슈로 제시합니다. 투자 판단과 책임은 사용자에게 있습니다.
+> ⚠️ 본 서비스는 투자 자문이 아니라 공개 데이터를 모아 이해를 돕는 참고용 도구입니다. 매수·매도 추천이나 주가 예측은 하지 않으며, 가격 변동의 원인도 '단정'이 아니라 관련 이슈로 제시합니다. 투자 판단과 책임은 사용자에게 있습니다.
+
+📘 **사용 설명서(전체 기능 + 사용법 + 실행 가이드): [`docs/StockPilot_사용설명서.pdf`](docs/StockPilot_사용설명서.pdf)**
 
 ---
 
 ## ✨ 주요 기능
 
-- **종목 분석**: 종목명을 물으면 시세·뉴스·공시를 모아 최근 이슈를 요약 (등락 폭과 무관하게 항상 동작)
-- **등락 표시**: 종목의 상승(▲·빨강)/하락(▼·파랑) 등락률을 크게 표시
-- **원인 분석(리즈닝)**: 그 등락의 원인으로 볼 수 있는 이슈를 뉴스·공시에서 찾아 근거·출처와 함께 정리
-- **오늘의 급등·급락 종목** *(여유 시)*: 유니버스(시총 상위/관심종목 **10개**)에서 크게 움직인 종목을 등락률·원인과 함께 정리 (배치로 미리 계산해 캐시)
-- **개념·공시 설명 (RAG)**: 투자 용어와 사업보고서 리스크 요인을 문서에서 찾아 초보자 눈높이로 설명
-- **가격 차트 + 뉴스 마커** *(여유 시)*: 일봉 캔들차트 위에 관련 뉴스가 난 날짜를 마커로 표시 (실시간 틱이 아닌 일봉 기반)
-- **SSE 스트리밍**: 답변을 글자 단위로 실시간 출력
+- **종목 분석**: 종목명을 물으면 시세·뉴스·공시를 모아 최근 등락률(▲빨강/▼파랑)을 크게 보여주고, 등락의 원인 이슈를 근거·출처와 함께 정리 (등락 폭과 무관하게 항상 동작)
+- **가운데 인사이트 패널**: 일봉 차트 + 관련 뉴스 + 최근 공시 카드를 한 화면에 표시 (여러 종목이면 위→아래로 순서대로 쌓임)
+- **상승률 상위 종목(스크리너)**: "요즘 오르는 종목" 질문 시 유니버스(대형주 22종목)의 실제 등락률을 조회해 상승률 상위 5개를 정리하고, 종목별 차트를 하나씩 순차 스트리밍
+- **공시 조회**: 종목의 최근 전자공시(OpenDART) 목록 제공
+- **투자 용어 설명(RAG)**: 용어·개념을 문서/사전에서 찾아 초보자 눈높이로 설명. 답변 속 등록 용어에 밑줄 + 클릭 시 정의 툴팁(나무위키식 각주)
+- **로그인 & 사용자별 대화 저장**: 회원가입/로그인 시 대화를 서버(Supabase)에 사용자별 저장. 게스트 대화 이관, 다른 기기 동기화, 로그인 시 최신 대화로 진입
+- **대화 목록 관리**: 새 대화·전환·삭제·즐겨찾기(★, 우클릭 메뉴)
+- **LLM 모델 선택 + 자동 폴백**: Solar / GPT-4o mini / Gemini / Claude 선택. 실패 시 다른 모델 → 기본 템플릿으로 단계적 폴백, 사용 모델 표시
+- **가드레일**: 매수·매도 추천, 목표주가·주가 예측, 프롬프트 인젝션 차단
+- **SSE 스트리밍**: 답변을 글자 단위로 실시간 출력 (입력 시에만 하단 스크롤, 응답 중 화면 고정)
+- **관측(LLMOps)**: Langfuse 트레이싱, 도구 타임아웃+재시도, 네이버 429 방어(동시성 제한+백오프)
 
 ---
 
 ## 🧰 기술 스택
 
 - **Backend**: Python 3.11, FastAPI, LangGraph, Pydantic, uv
-- **LLM / 임베딩**: Upstage Solar (solar-pro3) + Solar Embedding
+- **LLM / 라우팅**: Upstage Solar(solar-pro3) + Solar Embedding, LiteLLM(모델 라우팅/폴백)
 - **데이터 소스**: 네이버 검색 API(뉴스) · OpenDART(공시) · pykrx(시세·재무)
-- **RAG / DB**: Supabase (PostgreSQL + pgvector)
+- **RAG / DB / 인증**: Supabase(PostgreSQL + pgvector), JWT
+- **관측**: Langfuse
 - **스트리밍**: SSE (FastAPI StreamingResponse)
-- **Frontend**: React + Vite + React Bits + lightweight-charts(일봉 캔들차트)
+- **Frontend**: React + Vite + React Bits, 일봉 차트
 - **배포 / CI**: Docker · GCP Compute Engine · GitHub Actions
 - **품질**: ruff, pytest, loguru
 
@@ -35,179 +42,130 @@
 
 ## ✅ 사전 준비물
 
-- **Python 3.11 이상**
-- **[uv](https://docs.astral.sh/uv/)** (파이썬 패키지·가상환경 매니저)
-- **API 키**
+- **Python 3.11 이상**, **[uv](https://docs.astral.sh/uv/)**, **Node.js 18+**(프론트엔드)
+- **필수 API 키**
   - Upstage Solar — https://console.upstage.ai/
-  - 네이버 검색 API (Client ID / Secret) — https://developers.naver.com/
+  - 네이버 검색 API(Client ID/Secret) — https://developers.naver.com/
   - OpenDART 인증키 — https://opendart.fss.or.kr/
-  - Supabase 프로젝트 (URL / Key) — https://supabase.com/
-  - ※ pykrx는 별도 키가 필요 없습니다.
+  - Supabase 프로젝트(URL/Key) — https://supabase.com/
+- **선택**
+  - OpenAI / Gemini / Anthropic 키 — 모델 라우팅·폴백용
+  - Langfuse 키 — 트레이싱
+  - KRX 계정(data.krx.co.kr) — 재무지표(PER/PBR 등). 없어도 시세·차트·분석은 정상 동작
 
 ---
 
 ## 🚀 빠른 시작
 
+### 1) 백엔드
 ```bash
-# 1) 의존성 설치
-uv sync
-
-# 2) 환경변수 설정 (.env.example 복사 후 값 채우기)
-copy .env.example .env      # Windows
-# cp .env.example .env      # macOS / Linux
-
-# 3) Supabase SQL Editor에서 data/supabase_schema.sql 실행
-
-# 4) 투자 용어 사전 임베딩 적재
-uv run python data/scripts/ingest_rag.py
-
-# 4-1) structured glossary exact lookup check
-uv run python data/scripts/ingest_rag.py lookup-term --query PER
-
-# 5) 사업보고서 파싱 결과만 먼저 확인(선택)
-uv run python data/scripts/ingest_rag.py fetch-dart --company 삼성전자
-
-# 6) 사업보고서를 Supabase에 적재(선택)
-uv run python data/scripts/ingest_rag.py ingest-dart --company 삼성전자
-
-# 7) 주요 종목 10개 사업보고서 배치 캐시(선택)
-uv run python data/scripts/ingest_rag.py ingest-dart-batch
-
-# 8) 개발 서버 실행
-uv run uvicorn app.main:app --reload
+uv sync                                  # 의존성 설치
+copy .env.example .env                   # (mac/Linux: cp) 후 키 채우기
+# Supabase SQL Editor에서 data/supabase_schema.sql 실행 (테이블·검색함수·conversations 생성)
+uv run python data/scripts/ingest_rag.py # 투자용어 사전 임베딩 적재
+uv run uvicorn app.main:app --reload     # http://localhost:8000/docs
 ```
 
-접속: API 문서 http://localhost:8000/docs
+### 2) 프론트엔드
+```bash
+cd frontend
+npm install
+npm run dev                              # http://localhost:5173
+```
+
+### 3) (선택) Docker로 한번에
+```bash
+docker compose up --build                # 백엔드 + 프론트(nginx) 컨테이너
+```
+
+> `.env`는 절대 커밋되지 않습니다(`.gitignore` 등록). API 키·KRX 자격증명은 각자 `.env`에만 둡니다.
 
 ---
 
-## 📄 문서 처리 파이프라인
+## 🧠 아키텍처 (LangGraph)
 
-PDF·이미지는 Upstage Document Parse로 표와 제목 구조를 보존한 Markdown으로
-변환한 뒤 RAG에 적재합니다. Document Parse가 실패하면 PDF는 기존 pypdf
-파서로 대체할 수 있습니다. Information Extract를 함께 사용하면 주요 사업,
-위험요인, 소송·제재, 감사의견을 JSON으로 추출해 `document_facts`에 저장합니다.
-
-```bash
-# 파싱·청킹 결과만 로컬에서 확인
-uv run python data/scripts/ingest_rag.py prepare-file \
-  --path report.pdf --parser upstage --business-report --extract-facts
-
-# Supabase documents + document_facts에 적재
-uv run python data/scripts/ingest_rag.py ingest-file \
-  --path report.pdf --parser upstage --business-report --extract-facts \
-  --source-id report:sample --title "샘플 사업보고서"
+```
+사용자 질문
+   └─ router (규칙 + Solar LLM 라우터)  →  intent = chat / rag / tool  (+ screen, tool_mode)
+        ├─ rag      : 용어·공시 문서 pgvector 검색
+        ├─ tool     : 시세(get_stock_price) · 뉴스(get_news) · 공시(get_disclosure)
+        │             · 상승률 스크리너(find_positive_news_stocks) · 관심종목(add_watchlist)
+        └─ response : 근거 데이터로만 답변 생성(Solar/LiteLLM 폴백) → SSE 스트리밍
 ```
 
-문서 적재 시에만 Document Parse·Information Extract를 호출하고, 사용자 질문
-시에는 미리 저장한 pgvector 청크와 구조화 정보를 조회합니다.
+- 스크리너는 유니버스의 **실제 등락률을 조회해 상승률 순 상위**를 뽑고, 종목별 상세 패널은 라우트에서 하나씩 순차 조회·전송(선조회 지연 방지).
+- 뉴스 매칭은 우선주(예: 삼성전자우) 오매칭을 차단하고, 상승 목록은 실제 주가 상승분만 포함.
 
 ---
 
-## ⚙️ 환경변수
+## 🔌 API 요약 (`/api/v1`)
 
-| 변수 | 설명 | 예시 / 기본값 |
+| 메서드 | 엔드포인트 | 설명 |
 | --- | --- | --- |
-| `ENVIRONMENT` | 실행 환경 | `development` |
-| `DEBUG` | 디버그 모드 | `true` |
-| `UPSTAGE_API_KEY` | Upstage Solar API 키 | — |
-| `LLM_MODEL` | 사용할 Solar 모델명 | `solar-pro3` |
-| `EMBEDDING_MODEL` | 문서·질문 임베딩 모델 | `solar-embedding-1-large` |
-| `EMBEDDING_DIMENSION` | pgvector와 맞출 임베딩 차원 | `4096` |
-| `NAVER_CLIENT_ID` | 네이버 검색 API Client ID | — |
-| `NAVER_CLIENT_SECRET` | 네이버 검색 API Client Secret | — |
-| `DART_API_KEY` | OpenDART 인증키 | — |
-| `SUPABASE_URL` | Supabase 프로젝트 URL | — |
-| `SUPABASE_KEY` | 백엔드 전용 Supabase service-role 키 | — |
-| `RAG_CHUNK_SIZE` | 공시 문서 청크 최대 문자 수 | `1600` |
-| `RAG_CHUNK_OVERLAP` | 인접 청크 중복 문자 수 | `200` |
+| POST | `/auth/register`, `/auth/login` | 회원가입 / 로그인 → JWT 발급 |
+| POST | `/chat/stream` | 질문 → SSE로 분석·답변 스트리밍 |
+| POST | `/chat/` | 단건(비스트리밍) 응답 |
+| GET/PUT/POST/DELETE | `/conversations` | 사용자별 대화 조회·저장·일괄저장·삭제 |
+| GET/POST/DELETE | `/watchlist` | 관심종목 조회·추가·삭제 |
+| GET | `/health` | 헬스체크 |
 
-> `.env`는 절대 커밋하지 않습니다. (`.gitignore`에 등록)
+전체 스펙은 실행 후 `http://localhost:8000/docs` 참고.
 
 ---
 
-## 📁 프로젝트 구조 (목표)
+## ⚙️ 환경변수 (요약)
 
-> 아래는 완성 목표 구조입니다. 킥오프(Day1) 시점에는 뼈대부터 만들고, 로드맵에 따라 하나씩 채워갑니다.
+| 변수 | 설명 |
+| --- | --- |
+| `UPSTAGE_API_KEY`, `LLM_MODEL` | Solar API 키 / 모델명(solar-pro3) |
+| `NAVER_CLIENT_ID/SECRET` | 네이버 검색 API(뉴스) |
+| `DART_API_KEY` | OpenDART 공시 |
+| `SUPABASE_URL/KEY` | Supabase(RAG·인증·대화 저장) |
+| `JWT_SECRET`, `JWT_EXPIRE_MINUTES` | 인증 토큰 |
+| `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` | (선택) 모델 폴백 |
+| `LANGFUSE_PUBLIC_KEY/SECRET_KEY/HOST` | (선택) 트레이싱 |
+| `KRX_ID`, `KRX_PW` | (선택) 재무지표(PER/PBR) |
+| `LLM_GUARDRAILS_ENABLED` | 가드레일 on/off |
+
+전체 목록은 `.env.example` 참고.
+
+---
+
+## 🚢 배포
+
+- **Docker Multi-stage**: 프론트(빌드→nginx) + 백엔드 컨테이너, `docker-compose`로 실행
+- **GCP Compute Engine**: docker compose 배포, 외부 HTTP 접속
+- **GitHub Actions**: CI(pytest·프론트 빌드) + CD(GCE 자동 배포). 시크릿/API 키는 GitHub Secrets·`.env`로 분리
+
+---
+
+## 🧪 테스트
+
+```bash
+uv run pytest          # 백엔드 유닛/통합 테스트
+```
+
+---
+
+## 📁 프로젝트 구조
 
 ```
 StockPilot/
 ├── app/
-│   ├── main.py                # FastAPI 진입점 (앱 생성·미들웨어·라우터 등록)
-│   ├── core/
-│   │   ├── config.py          # 환경변수 설정 (pydantic-settings)
-│   │   └── prompts.py         # 페르소나·분류·리즈닝 프롬프트
-│   ├── schemas/
-│   │   └── chat.py            # ChatRequest/Response, StreamEvent(SSE)
-│   ├── graph/                 # LangGraph 에이전트
-│   │   ├── state.py           # State 정의
-│   │   ├── nodes.py           # router / rag / tool / response 노드
-│   │   ├── edges.py           # 라우팅 로직
-│   │   └── graph.py           # 그래프 조립 (싱글톤)
-│   ├── tools/
-│   │   └── executor.py        # get_stock_price / get_news / get_disclosure /
-│   │                          # find_positive_news_stocks / add_watchlist
-│   ├── repositories/          # 데이터 접근 계층
-│   │   ├── price.py           # pykrx 시세·재무
-│   │   ├── news.py            # 네이버 검색 API + 뉴스 선별 파이프라인
-│   │   ├── disclosure.py      # OpenDART 공시
-│   │   └── rag.py             # Supabase pgvector 검색
-│   └── api/routes/
-│       ├── chat.py            # /chat, /chat/stream (SSE)
-│       └── health.py          # 헬스체크
+│   ├── main.py                # FastAPI 진입점
+│   ├── core/                  # config · prompts · llm(라우팅/폴백) · guardrails · observability
+│   ├── graph/                 # LangGraph: state · nodes(router/rag/tool/response) · edges · graph
+│   ├── tools/executor.py      # 도구 실행(시세/뉴스/공시/스크리너/관심종목) + 타임아웃·재시도
+│   ├── repositories/          # price(pykrx) · news(네이버) · disclosure(DART) · rag · glossary · conversations · users · watchlist
+│   ├── schemas/               # chat(SSE) · tool_results · auth 등
+│   └── api/routes/            # auth · chat · conversations · watchlist · health
 ├── data/
-│   ├── glossary.json          # 투자 용어 사전 (RAG 원본)
-│   ├── supabase_schema.sql    # documents·pgvector 검색 함수
-│   └── scripts/
-│       └── ingest_rag.py      # 용어·공시 문서 임베딩 적재
-├── frontend/                  # React + React Bits (별도 프론트)
+│   ├── glossary.json          # 투자 용어 사전(RAG 원본)
+│   ├── supabase_schema.sql    # 테이블 · pgvector 검색함수 · conversations
+│   └── scripts/ingest_rag.py  # 용어·공시 임베딩 적재
+├── docs/StockPilot_사용설명서.pdf  # 사용 설명서 + 실행 가이드
+├── frontend/                  # React + Vite UI
 ├── tests/                     # pytest
-├── .env.example
-├── pyproject.toml
-└── README.md
+├── Dockerfile · docker-compose.yml · deploy/
+├── .env.example · pyproject.toml · README.md
 ```
-
----
-
-## 📂 파일별 역할
-
-> 현재 전부 **스텁(뼈대)** 상태이며, 개발 단계(1~10단계)에서 순서대로 채웁니다.
-
-**설정 · 공통**
-
-- `pyproject.toml` — 의존성·도구(ruff/pytest) 설정
-- `.env.example` — 필요한 환경변수 목록 (실제 키는 각자 `.env`에)
-- `app/main.py` — FastAPI 앱 생성·미들웨어·라우터 등록 진입점
-- `app/core/config.py` — 환경변수 로드(pydantic-settings), 설정 싱글톤
-- `app/core/prompts.py` — 라우터·뉴스분류·리즈닝·페르소나 프롬프트
-
-**스키마**
-
-- `app/schemas/chat.py` — `ChatRequest`/`ChatResponse`, `StreamEvent`(SSE 이벤트 + `to_sse()`)
-
-**에이전트 (LangGraph)**
-
-- `app/graph/state.py` — 노드들이 공유하는 State 정의
-- `app/graph/nodes.py` — `router`/`rag`/`tool`/`response` 노드
-- `app/graph/edges.py` — 의도에 따른 분기(`route_by_intent`)
-- `app/graph/graph.py` — 그래프 조립 + 싱글톤 컴파일
-
-**도구 · 데이터 접근**
-
-- `app/tools/executor.py` — 도구 실행(ReAct). 아래 도구 명세 참고
-- `app/repositories/price.py` — pykrx 시세·일봉·재무
-- `app/repositories/news.py` — 네이버 검색 API 뉴스 수집 + 룰 필터
-- `app/repositories/disclosure.py` — OpenDART 공시 조회
-- `app/repositories/rag.py` — Supabase pgvector 문서 검색
-
-**API**
-
-- `app/api/routes/chat.py` — `/chat`(단건), `/chat/stream`(SSE)
-- `app/api/routes/health.py` — 헬스체크
-- `app/api/routes/__init__.py` — 라우터 취합(`/api/v1`)
-
-**데이터 · 테스트 · 프론트**
-
-- `data/glossary.json` — 투자 용어 사전(RAG 원본)
-- `data/scripts/ingest_rag.py` — 용어·공시 임베딩 적재 스크립트
-- `tests/test_agent.py`, `tests/test_api.py` —
