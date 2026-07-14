@@ -563,7 +563,7 @@ def _market_overview_answer(price: dict) -> str:
     snapshot_at = _format_datetime_kst(price.get("snapshot_at"))
 
     lines = [
-        f"{_topic_subject(name)} 일봉 기준 {period}으로 보면 {trend_text}.",
+        f"{_topic_subject(name)} 일봉 기준, {period} 차트로 보면 {trend_text}.",
         "",
         f"기준일: {as_of} · 조회시각: {snapshot_at}",
     ]
