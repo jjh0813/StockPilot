@@ -198,13 +198,13 @@ function App() {
             <span className="mb-4 block font-mono text-xs uppercase tracking-[0.35em] text-neutral-400 drop-shadow">
               Stock Research Assistant
             </span>
-            <h1 className="mb-4 text-4xl font-semibold tracking-tight text-white drop-shadow-lg sm:text-5xl">
-              <span className="block">궁금한 종목,</span>
-              <span className="block">왜 움직였는지 물어보세요</span>
+            <h1 className="mb-5 text-4xl font-semibold leading-tight tracking-tight text-white drop-shadow-lg sm:text-5xl">
+              <span className="block">차트는 결과를 보여줍니다.</span>
+              <span className="block">우리는 이유를 찾아냅니다.</span>
             </h1>
             <p className="mb-10 max-w-lg text-balance text-neutral-300 drop-shadow">
-              종목명만 입력하면 시세·뉴스·공시를 모아 상승과 하락의 이유를
-              초보자도 이해하기 쉽게 정리해드려요.
+              <span className="block">종목을 검색하면 뉴스와 공시를 분석해</span>
+              <span className="block">주가 변동의 원인을 근거와 함께 설명합니다.</span>
             </p>
             <button
               type="button"
