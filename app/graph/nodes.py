@@ -565,17 +565,16 @@ def _direction_word(direction: str) -> str:
 
 
 def _is_market_overview_question(text: str) -> bool:
-    """'요즘 어때?'처럼 현재 흐름을 묻는 질문인지 판별한다."""
+    """종목 현황 질문인지 판별한다.
+
+    종목이 이미 tool 라우트로 들어온 뒤에는 overview를 기본값으로 둔다.
+    사용자가 명시적으로 왜/원인/이유/배경을 물을 때만 원인 분석으로 넘긴다.
+    """
 
     lower = (text or "").lower()
-    overview_hints = ("요즘", "어때", "어떰", "상황", "흐름", "최근", "분위기")
-    reason_hints = ("왜", "이유", "원인", "때문", "뭐 때문에", "뭔 일")
+    reason_hints = ("왜", "이유", "원인", "배경", "때문", "뭐 때문에", "뭔 일", "무슨 일")
     action_hints = ("살까", "팔까", "매수", "매도", "추천")
-    return (
-        any(hint in lower for hint in overview_hints)
-        and not any(hint in lower for hint in reason_hints)
-        and not any(hint in lower for hint in action_hints)
-    )
+    return not any(hint in lower for hint in reason_hints + action_hints)
 
 
 def _format_date_kr(value: str | None) -> str:

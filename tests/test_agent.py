@@ -285,6 +285,29 @@ async def test_response_node_overview_keeps_header_but_avoids_reason_analysis():
     assert "원인 분석" not in content
 
 
+async def test_response_node_overview_is_default_for_stock_status_question():
+    state = create_initial_state("overview-any-wording")
+    state["intent"] = "tool"
+    state["ticker"] = "한화오션"
+    state["price_data"] = {
+        **stock_snapshot(),
+        "name": "한화오션",
+        "change_pct": -2.54,
+        "current_price": 76800,
+        "snapshot_at": "2026-07-14T07:25:00+00:00",
+    }
+    state["messages"] = [HumanMessage(content="한화오션 어떠냐")]
+
+    result = await response_node(state)
+    content = result["messages"][-1].content
+
+    assert result["used_model"] == "template-market-overview"
+    assert "한화오션" in content
+    assert "전 거래일 대비" in content
+    assert "왜 떨어졌어?" in content
+    assert "원인 분석" not in content
+
+
 async def test_response_node_overview_separates_trend_from_daily_move():
     rows = []
     closes = [
