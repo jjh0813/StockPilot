@@ -733,6 +733,15 @@ async def response_node(state: StockPilotState) -> dict:
     user_text = _last_user_text(state)
     intent = state.get("intent")
 
+    if direction_notice and price:
+        logger.info("💬 [Response] 방향 보정 템플릿 응답 생성 완료")
+        answer = _fallback_answer(price, news_items, docs, direction_notice)
+        answer = sanitize_llm_output(answer)
+        return {
+            "messages": [AIMessage(content=answer)],
+            "used_model": "template-direction-correction",
+        }
+
     # 용어/개념 질문(rag): 사전에 있는 용어면 LLM 없이 바로 정의를 돌려준다(토큰 절약).
     if intent == "rag":
         if any(k in user_text for k in ("목록", "리스트", "용어들", "어떤 용어", "무슨 용어")):
