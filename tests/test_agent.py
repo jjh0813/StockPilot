@@ -447,6 +447,41 @@ async def test_tool_node_corrects_requested_down_when_actual_price_is_up(monkeyp
     assert result["tool_result"]["direction_notice"] == result["direction_notice"]
 
 
+async def test_tool_node_uses_resolved_company_name_for_news(monkeypatch):
+    calls = []
+
+    async def fake_execute(tool_name, tool_args=None, session_id="default"):
+        calls.append((tool_name, tool_args or {}))
+        if tool_name == "get_stock_price":
+            return {
+                "success": True,
+                "data": {
+                    **stock_snapshot(),
+                    "ticker": "064350",
+                    "name": "현대로템",
+                    "change_pct": -2.71,
+                },
+            }
+        if tool_name == "get_news":
+            return {"success": True, "data": {"news": [directional_news_item()]}}
+        if tool_name == "get_disclosure":
+            return {"success": True, "data": {"disclosures": []}}
+        raise AssertionError(f"unexpected tool: {tool_name}")
+
+    monkeypatch.setattr("app.graph.nodes._executor.execute", fake_execute)
+
+    state = create_initial_state("resolved-company-name")
+    state["ticker"] = "064350"
+    state["messages"] = [HumanMessage(content="현대로템 왜 떨어져?")]
+
+    await tool_node(state)
+
+    news_call = next(args for name, args in calls if name == "get_news")
+    disclosure_call = next(args for name, args in calls if name == "get_disclosure")
+    assert news_call["company"] == "현대로템"
+    assert disclosure_call["ticker"] == "064350"
+
+
 async def test_tool_node_corrects_requested_up_when_actual_price_is_down(monkeypatch):
     async def fake_execute(tool_name, tool_args=None, session_id="default"):
         if tool_name == "get_stock_price":

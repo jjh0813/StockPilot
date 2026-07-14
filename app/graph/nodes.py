@@ -469,9 +469,11 @@ async def tool_node(state: StockPilotState) -> dict:
         )
     else:
         direction = requested_direction if requested_direction in {"up", "down"} else actual_direction
-    disclosure_query = (price.get("data") or {}).get("ticker") or ticker
+    price_data = price.get("data") or {}
+    company_query = price_data.get("name") or ticker
+    disclosure_query = price_data.get("ticker") or ticker
     news_task = asyncio.create_task(
-        _executor.execute("get_news", {"company": ticker, "direction": direction})
+        _executor.execute("get_news", {"company": company_query, "direction": direction})
     )
     disclosure_task = asyncio.create_task(
         _executor.execute("get_disclosure", {"ticker": disclosure_query})

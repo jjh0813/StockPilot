@@ -107,6 +107,10 @@ async def test_resolve_known_corporation_without_corp_code_download(monkeypatch)
     hanwha_by_alias = await client.resolve_corporation("대우조선해양")
     celltrion_by_stock_code = await client.resolve_corporation("068270")
     celltrion_by_name = await client.resolve_corporation("셀트리온")
+    rotem_by_stock_code = await client.resolve_corporation("064350")
+    rotem_by_name = await client.resolve_corporation("현대로템")
+    ecopro_by_stock_code = await client.resolve_corporation("247540")
+    ecopro_by_name = await client.resolve_corporation("에코프로비엠")
 
     assert by_stock_code.corp_code == "00126380"
     assert by_name.stock_code == "005930"
@@ -118,6 +122,10 @@ async def test_resolve_known_corporation_without_corp_code_download(monkeypatch)
     assert hanwha_by_alias.corp_code == "00111704"
     assert celltrion_by_stock_code.corp_code == "00413046"
     assert celltrion_by_name.stock_code == "068270"
+    assert rotem_by_stock_code.corp_code == "00302926"
+    assert rotem_by_name.stock_code == "064350"
+    assert ecopro_by_stock_code.corp_code == "01160363"
+    assert ecopro_by_name.stock_code == "247540"
 
 
 @pytest.mark.asyncio
