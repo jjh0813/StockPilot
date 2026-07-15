@@ -10,7 +10,7 @@ on:
       agent_mode:
         description: "Frontend agent mode"
         required: false
-        default: "router"
+        default: "full_react"
         type: choice
         options:
           - router
@@ -26,7 +26,7 @@ env:
   GCE_INSTANCE: stockpilot-server
   GCE_ZONE: us-central1-f
   DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_ref || 'main' }}
-  FRONTEND_AGENT_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.agent_mode || 'router' }}
+  FRONTEND_AGENT_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.agent_mode || 'full_react' }}
 
 jobs:
   deploy:

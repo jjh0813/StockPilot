@@ -13,6 +13,7 @@ const MODEL_LABELS = {
 function modelFamily(value) {
   const v = String(value || '').toLowerCase()
   if (!v) return ''
+  if (v === 'scope-guard' || v === 'tool-router' || v === 'glossary-list') return 'internal'
   if (v === 'template-fallback') return 'template-fallback'
   if (v.startsWith('template-')) return 'template-intentional'
   if (v.includes('solar')) return 'solar'
@@ -43,6 +44,7 @@ function fallbackNotice(requestedModel, usedModel) {
   if (!requestedModel || !usedModel) return ''
   const requestedFamily = modelFamily(requestedModel)
   const usedFamily = modelFamily(usedModel)
+  if (usedFamily === 'internal') return ''
   if (!requestedFamily || !usedFamily || requestedFamily === usedFamily) return ''
   if (usedFamily === 'template-intentional') return ''
   if (usedFamily === 'template' || usedFamily === 'template-fallback') {
