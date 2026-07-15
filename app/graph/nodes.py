@@ -37,6 +37,12 @@ OUT_OF_SCOPE_MESSAGE = (
     "“공시 리스크 알려줘”, “최근 급등한 종목 있어?”처럼 물어봐 주세요."
 )
 
+MISSING_TICKER_FOLLOWUP_MESSAGE = (
+    "어떤 종목에 대한 질문인지 알려주세요. 예를 들어 “삼성전자 왜 올랐어?”, "
+    "“한화오션 왜 떨어졌어?”처럼 종목명을 함께 입력하면 최근 시세·뉴스·공시를 "
+    "근거로 설명해드릴게요."
+)
+
 # 용어·개념 질문 힌트 → rag로 분기
 RAG_HINTS = (
     "뭐야", "뭔데", "무슨 뜻", "무슨 의미", "뭔 의미", "의미", "뜻", "뜻이", "설명", "단어", "per", "pbr",
@@ -85,6 +91,14 @@ POSITIVE_NEWS_HINTS = (
 )
 
 ROUTER_LLM_DOMAIN_HINTS = INVESTMENT_DOMAIN_HINTS + SCREENER_HINTS + POSITIVE_NEWS_HINTS
+
+GENERIC_RECOMMENDATION_HINTS = (
+    "추천", "권장",
+)
+
+TRADE_ACTION_HINTS = (
+    "매수", "매도", "매입", "추매", "진입", "손절", "익절", "청산", "살까", "팔까",
+)
 
 _ROUTER_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -214,6 +228,15 @@ def _is_cause_question(text: str) -> bool:
 
     lower = (text or "").lower()
     return any(hint in lower for hint in CAUSE_HINTS)
+
+
+def _is_generic_recommendation_query(text: str) -> bool:
+    """Direct trade advice is blocked by guardrails; generic recommendation means market/stock summary."""
+
+    lower = (text or "").lower()
+    return any(hint in lower for hint in GENERIC_RECOMMENDATION_HINTS) and not any(
+        hint in lower for hint in TRADE_ACTION_HINTS
+    )
 
 
 def _is_disclosure_risk_question(text: str) -> bool:
@@ -428,11 +451,61 @@ async def router_node(state: StockPilotState) -> dict:
     is_domain_query = _has_investment_domain(text)
     is_followup = False
     prev = _SESSION_TICKER.get(session_id)
+    if _is_generic_recommendation_query(text):
+        if matched_stock:
+            _SESSION_TICKER[session_id] = matched_stock
+            logger.info("🔀 [Router] generic recommendation mapped to explicit stock overview")
+            return {
+                "intent": "tool",
+                "screen": False,
+                "ticker": matched_stock,
+                "tool_mode": "market",
+                "response_mode": "market_overview",
+                "is_followup": False,
+            }
+        if prev:
+            logger.info("🔀 [Router] generic recommendation mapped to previous stock overview")
+            return {
+                "intent": "tool",
+                "screen": False,
+                "ticker": prev,
+                "tool_mode": "market",
+                "response_mode": "market_overview",
+                "is_followup": True,
+            }
+        logger.info("🔀 [Router] generic recommendation mapped to screener overview")
+        return {
+            "intent": "tool",
+            "screen": True,
+            "ticker": None,
+            "tool_mode": "market",
+            "response_mode": "market_overview",
+            "is_followup": False,
+        }
+
     likely_followup = bool(
         prev
         and any(h in text for h in FOLLOWUP_HINTS)
         and any(h in text for h in FOLLOWUP_DOMAIN_HINTS)
     )
+    missing_ticker_followup = bool(
+        not matched_stock
+        and not prev
+        and not is_rag
+        and not wants_definition
+        and any(h in text for h in FOLLOWUP_HINTS)
+        and any(h in text for h in FOLLOWUP_DOMAIN_HINTS)
+    )
+    if missing_ticker_followup:
+        logger.info("🔀 [Router] missing ticker for follow-up question")
+        return {
+            "intent": "chat",
+            "screen": False,
+            "ticker": None,
+            "tool_mode": None,
+            "response_mode": "missing_ticker",
+            "is_followup": False,
+        }
 
     # 기본 안정 버전도 LLM 라우터를 우선 사용한다. 다만 Solar/JSON 실패 시에는
     # 아래의 기존 룰 기반 분기로 fallback해 서비스가 멈추지 않게 한다.
@@ -1275,6 +1348,8 @@ async def response_node(state: StockPilotState) -> dict:
     user_text = _last_user_text(state)
     if state.get("intent") == "chat":
         logger.info("💬 [Response] 범위 밖 질문 안내")
+        if state.get("response_mode") == "missing_ticker":
+            return {"messages": [AIMessage(content=MISSING_TICKER_FOLLOWUP_MESSAGE)]}
         return {"messages": [AIMessage(content=OUT_OF_SCOPE_MESSAGE)]}
 
     # 스크리너 결과는 목록 템플릿으로 바로 응답

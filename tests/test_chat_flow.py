@@ -153,7 +153,7 @@ def test_blocked_recommendation_does_not_create_followup_ticker_context():
     followup_events = _parse_sse(followup.text)
     assert all(event["type"] != "tool" for event in followup_events)
     response = next(event for event in followup_events if event["type"] == "response")
-    assert "주식 리서치 전용" in response["content"]
+    assert "어떤 종목" in response["content"]
 
 
 def test_blocked_recommendation_preserves_existing_valid_ticker_context(mock_tools):
@@ -185,8 +185,8 @@ def test_blocked_recommendation_preserves_existing_valid_ticker_context(mock_too
     assert followup_events[-1]["type"] == "done"
 
 
-def test_generic_recommendation_is_blocked_between_followups(mock_tools):
-    session_id = "guardrail-generic-recommend-between-followups"
+def test_generic_recommendation_reuses_previous_ticker_as_overview(mock_tools):
+    session_id = "generic-recommend-previous-ticker-overview"
     initial = client.post(
         "/api/v1/chat/stream",
         json={"message": "카카오 요즘 어때", "session_id": session_id},
@@ -194,15 +194,14 @@ def test_generic_recommendation_is_blocked_between_followups(mock_tools):
     assert initial.status_code == 200
     assert any(event["type"] == "tool" for event in _parse_sse(initial.text))
 
-    blocked = client.post(
+    recommend = client.post(
         "/api/v1/chat/stream",
         json={"message": "추천해줘", "session_id": session_id},
     )
-    assert blocked.status_code == 200
-    blocked_events = _parse_sse(blocked.text)
-    assert blocked_events[0]["type"] == "error"
-    assert "매수·매도 여부는 추천할 수 없습니다" in blocked_events[0]["error"]
-    assert all(event["type"] != "tool" for event in blocked_events)
+    assert recommend.status_code == 200
+    recommend_events = _parse_sse(recommend.text)
+    tool_event = next(event for event in recommend_events if event["type"] == "tool")
+    assert tool_event["tool_name"] == "get_stock_price,get_news,get_disclosure"
 
     followup = client.post(
         "/api/v1/chat/stream",

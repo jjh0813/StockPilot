@@ -103,7 +103,6 @@ _BUY_SELL_ADVICE_REQUEST_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"(매수|매도|매입|추매|진입|손절|익절|청산)\s*(추천|권장)\s*(해줘|해|좀|부탁|해봐|줘)?",
         r"(사|팔)\s*(추천|권장)\s*(해줘|해|좀|부탁|해봐|줘)",
         r"(추천|권장).*(매수|매도|매입|추매|진입|손절|익절|청산)",
-        r"^\s*(추천|권장)\s*(해줘|해|좀|부탁|해봐|줘|해주세요|해주시겠어요)?\s*[?.!]*\s*$",
         # English equivalents for the same direct buy/sell advice request.
         r"should\s+i\s+(buy|sell)",
         r"(buy|sell)\s+(now|today|\?)",
