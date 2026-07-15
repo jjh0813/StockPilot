@@ -152,6 +152,7 @@ async def test_router_node_followup_disclosure_definition_is_rag():
 
     assert result["intent"] == "rag"
     assert result["screen"] is False
+    assert result["ticker"] is None
     assert result.get("tool_mode") is None
 
 
@@ -163,6 +164,7 @@ async def test_router_node_disclosure_word_meaning_is_rag():
 
     assert result["intent"] == "rag"
     assert result["screen"] is False
+    assert result["ticker"] is None
     assert result.get("tool_mode") is None
 
 

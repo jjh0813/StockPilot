@@ -300,7 +300,7 @@ async def router_node(state: StockPilotState) -> dict:
             intent = "tool" if wants_cause else ("rag" if is_rag else "tool")
             tool_mode = "market" if intent == "tool" else None
     elif is_rag and is_domain_query:
-        ticker = _clean_ticker(text)
+        ticker = None if wants_definition else _clean_ticker(text)
         intent = "rag"
         tool_mode = None
     else:
