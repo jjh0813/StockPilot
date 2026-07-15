@@ -293,7 +293,22 @@ async def test_router_node_followup_cause_reuses_previous_ticker():
     assert result["is_followup"] is True
 
 
-async def test_router_node_generic_recommendation_reuses_previous_ticker():
+async def test_router_node_kakao_status_then_why_up_reuses_kakao_context():
+    state = create_initial_state("kakao-cause-followup")
+    state["messages"] = [HumanMessage(content="카카오 어때")]
+    await router_node(state)
+
+    state = create_initial_state("kakao-cause-followup")
+    state["messages"] = [HumanMessage(content="왜 올랐어?")]
+    result = await router_node(state)
+
+    assert result["intent"] == "tool"
+    assert result["ticker"] == "카카오"
+    assert result["tool_mode"] == "market"
+    assert result["is_followup"] is True
+
+
+async def test_router_node_generic_recommendation_uses_screener_even_after_previous_ticker():
     state = create_initial_state("generic-recommend-followup")
     state["messages"] = [HumanMessage(content="삼성전자 요즘 어때?")]
     await router_node(state)
@@ -303,11 +318,18 @@ async def test_router_node_generic_recommendation_reuses_previous_ticker():
     result = await router_node(state)
 
     assert result["intent"] == "tool"
-    assert result["screen"] is False
-    assert result["ticker"] == "삼성전자"
+    assert result["screen"] is True
+    assert result["ticker"] is None
     assert result["tool_mode"] == "market"
     assert result["response_mode"] == "market_overview"
-    assert result["is_followup"] is True
+    assert result["is_followup"] is False
+
+    state = create_initial_state("generic-recommend-followup")
+    state["messages"] = [HumanMessage(content="왜 올랐어?")]
+    result = await router_node(state)
+
+    assert result["intent"] == "chat"
+    assert result["response_mode"] == "missing_ticker"
 
 
 async def test_router_node_generic_recommendation_without_context_uses_screener():

@@ -463,16 +463,7 @@ async def router_node(state: StockPilotState) -> dict:
                 "response_mode": "market_overview",
                 "is_followup": False,
             }
-        if prev:
-            logger.info("🔀 [Router] generic recommendation mapped to previous stock overview")
-            return {
-                "intent": "tool",
-                "screen": False,
-                "ticker": prev,
-                "tool_mode": "market",
-                "response_mode": "market_overview",
-                "is_followup": True,
-            }
+        _SESSION_TICKER.pop(session_id, None)
         logger.info("🔀 [Router] generic recommendation mapped to screener overview")
         return {
             "intent": "tool",

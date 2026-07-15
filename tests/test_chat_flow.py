@@ -28,6 +28,21 @@ async def _fake_execute(tool_name, tool_args=None, session_id="default"):
                 ],
             },
         }
+    if tool_name == "find_positive_news_stocks":
+        return {
+            "success": True,
+            "data": {
+                "stocks": [
+                    {
+                        "ticker": "035720",
+                        "name": "카카오",
+                        "change_pct": 4.2,
+                        "reason": "최근 상승률과 긍정 뉴스가 함께 확인되었습니다.",
+                        "news": [],
+                    }
+                ]
+            },
+        }
     return {"success": False, "error": f"알 수 없는 도구: {tool_name}"}
 def _parse_sse(text):
     return [
@@ -185,8 +200,8 @@ def test_blocked_recommendation_preserves_existing_valid_ticker_context(mock_too
     assert followup_events[-1]["type"] == "done"
 
 
-def test_generic_recommendation_reuses_previous_ticker_as_overview(mock_tools):
-    session_id = "generic-recommend-previous-ticker-overview"
+def test_generic_recommendation_uses_screener_not_previous_ticker(mock_tools):
+    session_id = "generic-recommend-screener-after-stock"
     initial = client.post(
         "/api/v1/chat/stream",
         json={"message": "카카오 요즘 어때", "session_id": session_id},
@@ -201,7 +216,7 @@ def test_generic_recommendation_reuses_previous_ticker_as_overview(mock_tools):
     assert recommend.status_code == 200
     recommend_events = _parse_sse(recommend.text)
     tool_event = next(event for event in recommend_events if event["type"] == "tool")
-    assert tool_event["tool_name"] == "get_stock_price,get_news,get_disclosure"
+    assert tool_event["tool_name"] == "find_positive_news_stocks"
 
     followup = client.post(
         "/api/v1/chat/stream",
@@ -209,8 +224,9 @@ def test_generic_recommendation_reuses_previous_ticker_as_overview(mock_tools):
     )
     assert followup.status_code == 200
     followup_events = _parse_sse(followup.text)
-    tool_event = next(event for event in followup_events if event["type"] == "tool")
-    assert tool_event["tool_name"] == "get_stock_price,get_news,get_disclosure"
+    assert all(event["type"] != "tool" for event in followup_events)
+    response = next(event for event in followup_events if event["type"] == "response")
+    assert "어떤 종목" in response["content"]
     assert followup_events[-1]["type"] == "done"
 
 
