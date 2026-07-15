@@ -1,4 +1,5 @@
 """에이전트/그래프 단위 테스트 (네트워크·API 키 불필요)."""
+import pytest
 from langchain_core.messages import HumanMessage
 from app.graph.edges import route_by_intent
 from app.graph.nodes import (
@@ -12,6 +13,18 @@ from app.graph.nodes import (
 from app.graph.state import create_initial_state
 from app.tools.executor import _normalize_news_item
 from tests.fixtures.tool_responses import directional_news_item, stock_snapshot
+
+
+@pytest.fixture(autouse=True)
+def disable_llm_router_by_default(monkeypatch):
+    """Router tests should not hit real Solar unless a test explicitly opts in."""
+
+    async def fake_llm_route(query: str, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.graph.nodes._llm_route_query", fake_llm_route)
+
+
 def test_create_initial_state():
     state = create_initial_state("sess-1", "user-1")
     assert state["session_id"] == "sess-1"
@@ -67,9 +80,15 @@ async def test_router_node_tool():
 async def test_router_node_positive_news_screener_variants(monkeypatch):
     routed_queries = []
 
-    async def fake_llm_route(query: str):
+    async def fake_llm_route(query: str, **kwargs):
         routed_queries.append(query)
-        return {"intent": "tool", "screen": True, "tool_mode": "market"}
+        return {
+            "intent": "tool",
+            "screen": True,
+            "tool_mode": "market",
+            "ticker": None,
+            "answer_mode": "market_overview",
+        }
 
     monkeypatch.setattr("app.graph.nodes._llm_route_query", fake_llm_route)
 
@@ -87,11 +106,15 @@ async def test_router_node_positive_news_screener_variants(monkeypatch):
         assert result["screen"] is True
         assert result["ticker"] is None
 
-    assert routed_queries == []
+    assert routed_queries == [
+        "최근 급등한 종목 알려줘",
+        "호재 있는 종목 알려줘",
+        "좋은 뉴스 나온 종목 알려줘",
+    ]
 
 
 async def test_router_node_screener_rule_fallback_when_llm_router_fails(monkeypatch):
-    async def fake_llm_route(query: str):
+    async def fake_llm_route(query: str, **kwargs):
         return None
 
     monkeypatch.setattr("app.graph.nodes._llm_route_query", fake_llm_route)
@@ -125,6 +148,43 @@ async def test_router_node_disclosure_tool_mode():
     assert result["intent"] == "tool"
     assert result["ticker"] == "삼성전자"
     assert result["tool_mode"] == "disclosure"
+
+
+async def test_router_node_llm_routes_company_disclosure_risk(monkeypatch):
+    async def fake_llm_route(query: str, **kwargs):
+        assert query == "삼성전자 공시 리스크"
+        assert kwargs["matched_stock"] == "삼성전자"
+        return {
+            "intent": "tool",
+            "screen": False,
+            "tool_mode": "disclosure",
+            "ticker": "삼성전자",
+            "answer_mode": "disclosure_risk",
+        }
+
+    monkeypatch.setattr("app.graph.nodes._llm_route_query", fake_llm_route)
+
+    state = create_initial_state("disclosure-risk-router")
+    state["messages"] = [HumanMessage(content="삼성전자 공시 리스크")]
+
+    result = await router_node(state)
+
+    assert result["intent"] == "tool"
+    assert result["ticker"] == "삼성전자"
+    assert result["tool_mode"] == "disclosure"
+    assert result["response_mode"] == "disclosure_risk"
+
+
+async def test_router_node_disclosure_risk_concept_is_rag():
+    state = create_initial_state("disclosure-risk-concept")
+    state["messages"] = [HumanMessage(content="공시 리스크 뭐야")]
+
+    result = await router_node(state)
+
+    assert result["intent"] == "rag"
+    assert result["screen"] is False
+    assert result["ticker"] is None
+    assert result.get("tool_mode") is None
 
 
 async def test_router_node_followup_disclosure_uses_previous_ticker():
@@ -237,6 +297,55 @@ async def test_response_node_formats_disclosures_without_price_analysis():
     assert "사업보고서" in content
     assert "원인 분석" not in content
     assert "현재가" not in content
+
+
+async def test_response_node_generates_disclosure_risk_with_llm(monkeypatch):
+    prompts = []
+
+    class FakeResult:
+        message = type(
+            "Message",
+            (),
+            {
+                "content": (
+                    "삼성전자 최근 공시 중 자기주식 처분 관련 공시는 규모와 목적을 "
+                    "추가 확인할 필요가 있는 리스크 후보입니다."
+                )
+            },
+        )()
+        model_name = "solar-pro3-260323"
+        model_id = "solar"
+        fallback_used = False
+
+    async def fake_ainvoke(messages, **kwargs):
+        prompts.append(messages[0].content)
+        return FakeResult()
+
+    monkeypatch.setattr("app.graph.nodes.ainvoke_with_fallback", fake_ainvoke)
+
+    state = create_initial_state("disclosure-risk-response")
+    state["intent"] = "tool"
+    state["tool_mode"] = "disclosure"
+    state["response_mode"] = "disclosure_risk"
+    state["ticker"] = "삼성전자"
+    state["messages"] = [HumanMessage(content="삼성전자 공시 리스크")]
+    state["disclosures"] = [
+        {
+            "corp_name": "삼성전자",
+            "report_name": "주요사항보고서(자기주식처분결정)",
+            "received_date": "20260713",
+            "source_url": "https://dart.fss.or.kr/example",
+        }
+    ]
+
+    result = await response_node(state)
+    content = result["messages"][-1].content
+
+    assert "자기주식 처분" in content
+    assert "리스크 후보" in content
+    assert "### 삼성전자 최근 공시" not in content
+    assert "공시 리스크" in prompts[0]
+    assert result["used_model"] == "solar-pro3-260323"
 
 
 async def test_response_node_uses_external_glossary_fallback(monkeypatch):

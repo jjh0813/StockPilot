@@ -24,6 +24,7 @@ class StockPilotState(TypedDict, total=False):
     tool_args: Optional[dict[str, Any]]
     tool_result: Optional[Any]
     tool_mode: Optional[ToolMode]       # market=시세·뉴스, disclosure=공시 전용
+    response_mode: Optional[str]        # LLM 라우터가 지정한 응답 방식(disclosure_risk 등)
     price_data: Optional[Any]
     news_items: list[dict[str, Any]]
     disclosures: list[dict[str, Any]]   # 최근 공시 목록 (4번째 도구)
@@ -54,6 +55,7 @@ def create_initial_state(
         "tool_args": None,
         "tool_result": None,
         "tool_mode": None,
+        "response_mode": None,
         "price_data": None,
         "news_items": [],
         "disclosures": [],

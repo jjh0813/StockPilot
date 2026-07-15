@@ -13,6 +13,7 @@ from app.core.llm import ainvoke_with_fallback
 from app.core.market_time import tag_session
 from app.repositories.price import resolve_ticker
 from app.core.prompts import (
+    DISCLOSURE_RISK_RESPONSE_PROMPT,
     RAG_GROUNDING,
     RAG_RESPONSE_PROMPT,
     RESPONSE_PROMPT,
@@ -215,6 +216,25 @@ def _is_cause_question(text: str) -> bool:
     return any(hint in lower for hint in CAUSE_HINTS)
 
 
+def _is_disclosure_risk_question(text: str) -> bool:
+    """공시의 뜻이 아니라 공시에서 확인할 위험 신호를 묻는 질문인지 판별한다."""
+
+    lower = (text or "").lower()
+    return "공시" in lower and any(
+        hint in lower
+        for hint in (
+            "리스크",
+            "위험",
+            "위험요인",
+            "주의",
+            "주의점",
+            "악재",
+            "문제",
+            "이슈",
+        )
+    )
+
+
 def _parse_router_json(content: str) -> dict | None:
     """Solar 라우터의 JSON 응답을 안전하게 파싱한다."""
 
@@ -233,22 +253,49 @@ def _parse_router_json(content: str) -> dict | None:
     tool_mode = parsed.get("tool_mode")
     if tool_mode not in {"market", "disclosure", None}:
         tool_mode = None
+    answer_mode = parsed.get("answer_mode")
+    if answer_mode not in {
+        "market_overview",
+        "cause_analysis",
+        "disclosure_list",
+        "disclosure_risk",
+        "definition",
+        None,
+    }:
+        answer_mode = None
+    ticker = parsed.get("ticker")
+    if ticker is not None:
+        ticker = str(ticker).strip() or None
 
     return {
         "intent": intent,
         "screen": bool(parsed.get("screen")),
         "tool_mode": tool_mode,
+        "ticker": ticker,
+        "answer_mode": answer_mode,
     }
 
 
-async def _llm_route_query(text: str) -> dict | None:
-    """Solar에게 애매한 질문의 라우팅을 맡긴다. 실패하면 None으로 조용히 fallback."""
+async def _llm_route_query(
+    text: str,
+    *,
+    matched_stock: str | None = None,
+    previous_ticker: str | None = None,
+) -> dict | None:
+    """Solar에게 질문 라우팅을 맡긴다. 실패하면 None으로 조용히 fallback."""
+
+    context = (
+        f"사용자 질문: {text}\n"
+        f"룰 기반 종목 힌트: {matched_stock or '없음'}\n"
+        f"직전 대화 종목 힌트: {previous_ticker or '없음'}\n\n"
+        "위 힌트는 참고만 하되, 최종 분류는 질문 의도에 맞춰 JSON으로 반환하라."
+    )
 
     try:
         result = await ainvoke_with_fallback(
             [
                 SystemMessage(content=ROUTER_PROMPT),
-                HumanMessage(content=text),
+                HumanMessage(content=context),
             ],
             model_id="solar",
             timeout_seconds=8,
@@ -261,11 +308,75 @@ async def _llm_route_query(text: str) -> dict | None:
     if route:
         logger.info(
             "🔀 [Router:LLM] "
-            f"intent={route['intent']}, screen={route['screen']}, tool_mode={route['tool_mode']}"
+            f"intent={route['intent']}, screen={route['screen']}, "
+            f"tool_mode={route['tool_mode']}, ticker={route.get('ticker')}, "
+            f"answer_mode={route.get('answer_mode')}"
         )
     else:
         logger.warning("LLM router returned unparsable output; rule fallback used")
     return route
+
+
+def _materialize_llm_route(
+    route: dict,
+    *,
+    matched_stock: str | None,
+    previous_ticker: str | None,
+    is_followup: bool,
+) -> dict | None:
+    """Convert an LLM router JSON object into graph state fields."""
+
+    intent = route.get("intent")
+    screen = bool(route.get("screen"))
+    tool_mode = route.get("tool_mode")
+    response_mode = route.get("answer_mode")
+
+    if intent == "chat":
+        return {
+            "intent": "chat",
+            "screen": False,
+            "ticker": None,
+            "tool_mode": None,
+            "response_mode": response_mode,
+            "is_followup": False,
+        }
+
+    if intent == "rag":
+        return {
+            "intent": "rag",
+            "screen": False,
+            "ticker": route.get("ticker") or matched_stock,
+            "tool_mode": None,
+            "response_mode": response_mode,
+            "is_followup": is_followup,
+        }
+
+    if intent != "tool":
+        return None
+
+    if screen:
+        return {
+            "intent": "tool",
+            "screen": True,
+            "ticker": None,
+            "tool_mode": tool_mode or "market",
+            "response_mode": response_mode,
+            "is_followup": False,
+        }
+
+    ticker = route.get("ticker") or matched_stock or (previous_ticker if is_followup else None)
+    ticker = _clean_ticker(str(ticker)) if ticker else None
+    if not ticker:
+        return None
+
+    return {
+        "intent": "tool",
+        "screen": False,
+        "ticker": ticker,
+        "tool_mode": tool_mode or "market",
+        "response_mode": response_mode,
+        "is_followup": is_followup and not matched_stock,
+    }
 
 
 async def router_node(state: StockPilotState) -> dict:
@@ -289,6 +400,46 @@ async def router_node(state: StockPilotState) -> dict:
     wants_cause = _is_cause_question(text)
     is_domain_query = _has_investment_domain(text)
     is_followup = False
+    prev = _SESSION_TICKER.get(session_id)
+    likely_followup = bool(
+        prev
+        and any(h in text for h in FOLLOWUP_HINTS)
+        and any(h in text for h in FOLLOWUP_DOMAIN_HINTS)
+    )
+
+    # 기본 안정 버전도 LLM 라우터를 우선 사용한다. 다만 Solar/JSON 실패 시에는
+    # 아래의 기존 룰 기반 분기로 fallback해 서비스가 멈추지 않게 한다.
+    should_use_llm_router = bool(
+        matched_stock
+        or likely_followup
+        or is_domain_query
+        or is_rag
+        or wants_disclosure
+        or _should_ask_llm_router(text)
+    )
+    if should_use_llm_router:
+        logger.info("🔀 [Router] asking LLM router first")
+        route = await _llm_route_query(
+            text,
+            matched_stock=matched_stock,
+            previous_ticker=prev,
+        )
+        if route:
+            routed = _materialize_llm_route(
+                route,
+                matched_stock=matched_stock,
+                previous_ticker=prev,
+                is_followup=likely_followup,
+            )
+            if routed:
+                if routed.get("intent") == "tool" and routed.get("ticker"):
+                    _SESSION_TICKER[session_id] = routed["ticker"]
+                logger.info(
+                    "🔀 [Router] LLM route selected "
+                    f"intent={routed.get('intent')}, ticker={routed.get('ticker')}, "
+                    f"tool_mode={routed.get('tool_mode')}, response_mode={routed.get('response_mode')}"
+                )
+                return routed
 
     if matched_stock:
         _SESSION_TICKER[session_id] = matched_stock  # 문맥 저장
@@ -296,16 +447,18 @@ async def router_node(state: StockPilotState) -> dict:
         if wants_disclosure and not wants_definition:
             intent = "tool"
             tool_mode = "disclosure"
+            response_mode = "disclosure_risk" if _is_disclosure_risk_question(text) else "disclosure_list"
         else:
             intent = "tool" if wants_cause else ("rag" if is_rag else "tool")
             tool_mode = "market" if intent == "tool" else None
+            response_mode = None
     elif is_rag and is_domain_query:
         ticker = None if wants_definition else _clean_ticker(text)
         intent = "rag"
         tool_mode = None
+        response_mode = "definition"
     else:
         # 후속 질문(짧거나 왜/이유/전망 등)일 때만 세션의 직전 종목을 재사용
-        prev = _SESSION_TICKER.get(session_id)
         is_followup = bool(
             prev
             and any(h in text for h in FOLLOWUP_HINTS)
@@ -316,19 +469,31 @@ async def router_node(state: StockPilotState) -> dict:
             if wants_disclosure and not wants_definition:
                 intent = "tool"
                 tool_mode = "disclosure"
+                response_mode = "disclosure_risk" if _is_disclosure_risk_question(text) else "disclosure_list"
             else:
                 intent = "tool" if wants_cause else ("rag" if is_rag else "tool")
                 tool_mode = "market" if intent == "tool" else None
+                response_mode = None
         else:
             # 명확한 스크리너 표현은 고신뢰 룰로 즉시 처리한다.
             # LLM 라우터는 애매한 투자/뉴스 질문에만 보조적으로 사용해 지연과 비용을 줄인다.
             if _is_screener_query(text, wants_definition=wants_definition):
                 logger.info("🔀 [Router] intent=tool (rule screener)")
-                return {"intent": "tool", "screen": True, "ticker": None, "is_followup": False}
+                return {
+                    "intent": "tool",
+                    "screen": True,
+                    "ticker": None,
+                    "is_followup": False,
+                    "response_mode": "market_overview",
+                }
 
             if _should_ask_llm_router(text):
                 logger.info("🔀 [Router] asking LLM router")
-                route = await _llm_route_query(text)
+                route = await _llm_route_query(
+                    text,
+                    matched_stock=matched_stock,
+                    previous_ticker=prev,
+                )
                 if route:
                     if route["intent"] == "tool" and (
                         route["screen"] or _is_screener_query(text, wants_definition=wants_definition)
@@ -341,13 +506,19 @@ async def router_node(state: StockPilotState) -> dict:
                             "screen": False,
                             "ticker": _clean_ticker(text),
                             "tool_mode": None,
+                            "response_mode": route.get("answer_mode"),
                             "is_followup": False,
                         }
                     if route["intent"] == "chat" and not _is_screener_query(
                         text,
                         wants_definition=wants_definition,
                     ):
-                        return {"intent": "chat", "screen": False, "ticker": None, "is_followup": False}
+                        return {
+                            "intent": "chat",
+                            "screen": False,
+                            "ticker": None,
+                            "is_followup": False,
+                        }
 
             # KNOWN_STOCKS 밖의 상장 종목도 인식: 이름이 코드로 해석되면 시세 분석(tool)으로 처리
             cand = _clean_ticker(text)
@@ -359,12 +530,18 @@ async def router_node(state: StockPilotState) -> dict:
                 if code:
                     _SESSION_TICKER[session_id] = code
                     mode = "disclosure" if (wants_disclosure and not wants_definition) else "market"
+                    response_mode = (
+                        "disclosure_risk"
+                        if mode == "disclosure" and _is_disclosure_risk_question(text)
+                        else ("disclosure_list" if mode == "disclosure" else None)
+                    )
                     logger.info(f"🔀 [Router] intent=tool (resolved listed stock: {cand})")
                     return {
                         "intent": "tool",
                         "screen": False,
                         "ticker": code,
                         "tool_mode": mode,
+                        "response_mode": response_mode,
                         "is_followup": False,
                     }
 
@@ -377,6 +554,7 @@ async def router_node(state: StockPilotState) -> dict:
         "screen": False,
         "ticker": ticker,
         "tool_mode": tool_mode,
+        "response_mode": response_mode,
         "is_followup": is_followup,
     }
 
@@ -889,6 +1067,77 @@ def _format_disclosure_answer(ticker: str | None, disclosures: list[dict]) -> st
     return "\n".join(lines)
 
 
+def _disclosure_context(ticker: str | None, disclosures: list[dict]) -> str:
+    """LLM이 공시 리스크를 판단할 수 있도록 최근 공시 목록을 텍스트로 정리한다."""
+
+    name = ticker or "해당 종목"
+    if not disclosures:
+        return f"{name}: 최근 조회된 공시 없음"
+
+    lines = [f"종목: {name}", "최근 공시:"]
+    for item in disclosures[:10]:
+        title = item.get("report_name") or item.get("title") or "공시"
+        date = item.get("received_date") or item.get("date") or ""
+        corp = item.get("corp_name") or name
+        url = item.get("source_url") or item.get("url") or ""
+        lines.append(
+            "- "
+            + " · ".join(part for part in (title, corp, date, url) if part)
+        )
+    return "\n".join(lines)
+
+
+def _format_disclosure_risk_fallback(ticker: str | None, disclosures: list[dict]) -> str:
+    """LLM 실패 시에도 목록 나열 대신 리스크 관점의 최소 답변을 제공한다."""
+
+    name = ticker or "해당 종목"
+    if not disclosures:
+        return (
+            f"{name}의 최근 공시를 찾지 못해 공시 리스크를 판단할 근거가 부족해요.\n"
+            "DART 조회 가능 여부나 종목명을 다시 확인해 주세요.\n\n"
+            "※ 투자 자문이 아닌 참고 정보입니다."
+        )
+
+    risk_keywords = (
+        "자기주식",
+        "대량보유",
+        "소송",
+        "채무",
+        "보증",
+        "유상증자",
+        "감자",
+        "거래정지",
+        "불성실",
+        "감사의견",
+        "정정",
+        "해지",
+        "처분",
+    )
+    risk_like = [
+        item
+        for item in disclosures
+        if any(
+            keyword in (item.get("report_name") or item.get("title") or "")
+            for keyword in risk_keywords
+        )
+    ]
+
+    lines = [f"### {name} 공시 리스크 요약", ""]
+    if risk_like:
+        lines.append("최근 공시 중 추가 확인이 필요한 후보는 아래 항목이에요.")
+        for item in risk_like[:5]:
+            title = item.get("report_name") or item.get("title") or "공시"
+            date = item.get("received_date") or item.get("date") or ""
+            lines.append(f"- **{title}**" + (f" ({date})" if date else ""))
+        lines.append("")
+        lines.append("다만 공시 제목만으로 악재라고 단정하면 안 되고, 원문에서 규모·사유·반복 여부를 확인해야 해요.")
+    else:
+        lines.append("제목 기준으로 즉시 큰 리스크라고 단정할 만한 공시는 뚜렷하지 않아요.")
+        lines.append("반복 공시나 행정성 공시는 원문에서 지분 변동 규모와 제출 사유를 확인하는 정도가 좋습니다.")
+    lines += ["", "※ 투자 자문이 아닌 참고 정보입니다."]
+    return "\n".join(lines)
+
+
 def _fallback_answer(
     price: dict,
     news_items: list[dict],
@@ -943,6 +1192,8 @@ async def _direct_glossary_answer(query: str) -> str | None:
     """
     if not query.strip():
         return None
+    if _is_disclosure_risk_question(query):
+        return None
     try:
         matches = await search_or_research_terms(query, limit=1)
     except Exception as exc:
@@ -994,6 +1245,7 @@ def _glossary_list_answer() -> str | None:
 
 async def response_node(state: StockPilotState) -> dict:
     """수집한 근거를 바탕으로 Solar가 등락률·원인 분석 응답을 생성한다."""
+    user_text = _last_user_text(state)
     if state.get("intent") == "chat":
         logger.info("💬 [Response] 범위 밖 질문 안내")
         return {"messages": [AIMessage(content=OUT_OF_SCOPE_MESSAGE)]}
@@ -1004,8 +1256,49 @@ async def response_node(state: StockPilotState) -> dict:
         logger.info("💬 [Response] 스크리너 응답 생성 완료")
         return {"messages": [AIMessage(content=_format_screener(screener))]}
 
+    if state.get("tool_mode") == "disclosure" and (
+        state.get("response_mode") == "disclosure_risk"
+        or _is_disclosure_risk_question(user_text)
+    ):
+        logger.info("💬 [Response] 공시 리스크 LLM 응답 생성")
+        requested_model = state.get("model")
+        used_model = requested_model or "solar"
+        disclosures = state.get("disclosures") or []
+        try:
+            result = await ainvoke_with_fallback(
+                [
+                    SystemMessage(
+                        content=DISCLOSURE_RISK_RESPONSE_PROMPT
+                        + TOOL_GROUNDING.format(
+                            tool_result=_disclosure_context(
+                                state.get("ticker"),
+                                disclosures,
+                            )
+                        )
+                    ),
+                    HumanMessage(content=user_text or "공시 리스크를 요약해줘"),
+                ],
+                model_id=requested_model,
+                timeout_seconds=45,
+            )
+            answer = (result.message.content or "").strip()
+            used_model = result.model_name or result.model_id
+            if not answer:
+                answer = _format_disclosure_risk_fallback(state.get("ticker"), disclosures)
+        except Exception as exc:
+            logger.warning(
+                f"공시 리스크 LLM 응답 실패, 템플릿으로 폴백: {type(exc).__name__}: {exc}"
+            )
+            answer = _format_disclosure_risk_fallback(state.get("ticker"), disclosures)
+            used_model = "template-disclosure-risk"
+        answer = sanitize_llm_output(answer)
+        return {
+            "messages": [AIMessage(content=answer)],
+            "used_model": used_model,
+        }
+
     if state.get("tool_mode") == "disclosure":
-        logger.info("💬 [Response] 공시 전용 응답 생성 완료")
+        logger.info("💬 [Response] 공시 목록 응답 생성 완료")
         return {
             "messages": [
                 AIMessage(
@@ -1022,7 +1315,6 @@ async def response_node(state: StockPilotState) -> dict:
     disclosures = state.get("disclosures") or []
     docs = state.get("retrieved_docs") or []
     direction_notice = state.get("direction_notice")
-    user_text = _last_user_text(state)
     intent = state.get("intent")
 
     if direction_notice and price:
@@ -1054,6 +1346,12 @@ async def response_node(state: StockPilotState) -> dict:
             logger.info("💬 [Response] 사전 직접 응답 생성 완료")
             return {"messages": [AIMessage(content=direct)]}
         system = RAG_RESPONSE_PROMPT
+        if _is_disclosure_risk_question(user_text):
+            system += (
+                "\n\n중요: 사용자는 '공시'라는 단어의 단순 정의가 아니라 '공시 리스크'의 의미를 물었다. "
+                "공시가 무엇인지 한 줄로만 짚고, 공시에서 확인해야 할 위험 신호(소송, 증자, 채무보증, "
+                "감사의견, 거래정지, 대량보유 변동, 자기주식 처분 등)를 초보자 관점으로 설명하라."
+            )
         if docs:
             system += RAG_GROUNDING.format(context="\n\n".join(docs))
     else:
