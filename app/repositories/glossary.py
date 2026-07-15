@@ -357,14 +357,26 @@ def _clean_html(value: str) -> str:
 
 async def list_all_terms() -> list[dict[str, Any]]:
     """전체 용어 목록을 반환합니다 (답변 텍스트 내 용어 매칭용)."""
-    client = await get_supabase_client()
-    result = await (
-        client.table("glossary_terms")
-        .select(GLOSSARY_COLUMNS)
-        .limit(1000)
-        .execute()
+    rows: list[dict[str, Any]] = []
+    try:
+        client = await get_supabase_client()
+        result = await (
+            client.table("glossary_terms")
+            .select(GLOSSARY_COLUMNS)
+            .limit(1000)
+            .execute()
+        )
+        rows = [_normalize_row(row) for row in (result.data or [])]
+    except Exception as exc:
+        logger.warning(f"Supabase 전체 용어 조회 실패, 로컬 사전으로 대체: {type(exc).__name__}: {exc}")
+
+    existing_terms = {str(row.get("term") or "").casefold() for row in rows}
+    rows.extend(
+        row
+        for row in load_local_glossary_rows()
+        if str(row.get("term") or "").casefold() not in existing_terms
     )
-    return [_normalize_row(row) for row in (result.data or [])]
+    return rows
 
 
 def find_terms_in_text(
@@ -398,9 +410,10 @@ def find_terms_in_text(
         term_key = row.get("term", "")
         if term_key in matched:
             continue
-        start = text.find(surface)
-        if start < 0:
+        span = _find_surface_span(text, surface)
+        if span is None:
             continue
+        start, end = span
         end = start + len(surface)
         if any(start < o_end and end > o_start for o_start, o_end in occupied):
             continue
@@ -416,6 +429,33 @@ def find_terms_in_text(
             break
 
     return list(matched.values())
+
+
+def _find_surface_span(text: str, surface: str) -> tuple[int, int] | None:
+    start = text.find(surface)
+    while start >= 0:
+        end = start + len(surface)
+        if _is_valid_surface_match(text, start, end, surface):
+            return start, end
+        start = text.find(surface, start + 1)
+    return None
+
+
+def _is_valid_surface_match(text: str, start: int, end: int, surface: str) -> bool:
+    """Avoid matching short English aliases inside longer tokens, e.g. CB in PCB."""
+    if not _needs_ascii_word_boundary(surface):
+        return True
+    before = text[start - 1] if start > 0 else ""
+    after = text[end] if end < len(text) else ""
+    return not _is_ascii_token_char(before) and not _is_ascii_token_char(after)
+
+
+def _needs_ascii_word_boundary(surface: str) -> bool:
+    return bool(re.search(r"[A-Za-z0-9]", surface)) and not re.search(r"[가-힣]", surface)
+
+
+def _is_ascii_token_char(char: str) -> bool:
+    return bool(char and re.match(r"[A-Za-z0-9]", char))
 
 
 def rank_glossary_terms(

@@ -3,11 +3,22 @@ import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const TIP_W = 288 // 툴팁 너비(px)
+
+function isAsciiTokenChar(ch) {
+  return !!ch && /[A-Za-z0-9]/.test(ch)
 }
 
-const TIP_W = 288 // 툴팁 너비(px)
+function needsAsciiBoundary(surface) {
+  return /[A-Za-z0-9]/.test(surface) && !/[가-힣]/.test(surface)
+}
+
+function isValidSurfaceMatch(str, index, surface) {
+  if (!needsAsciiBoundary(surface)) return true
+  const before = index > 0 ? str[index - 1] : ''
+  const after = index + surface.length < str.length ? str[index + surface.length] : ''
+  return !isAsciiTokenChar(before) && !isAsciiTokenChar(after)
+}
 
 // LLM 답변을 마크다운으로 렌더링하면서, RAG 용어 사전에 있는 단어에는
 // 밑줄 + 클릭 시 나무위키식 각주(정의 툴팁)를 붙인다.
@@ -32,9 +43,6 @@ function GlossaryAnswer({ text, terms }) {
 
   const list = (terms || []).filter((t) => t && t.matched_text)
   const sorted = [...list].sort((a, b) => b.matched_text.length - a.matched_text.length)
-  const re = sorted.length
-    ? new RegExp(`(${sorted.map((t) => escapeRegExp(t.matched_text)).join('|')})`, 'g')
-    : null
 
   let seq = 0
 
@@ -49,23 +57,53 @@ function GlossaryAnswer({ text, terms }) {
   }
 
   function renderString(str, keyBase) {
-    if (!re) return str
-    const parts = str.split(re)
-    return parts.map((part, i) => {
-      const term = sorted.find((t) => t.matched_text === part)
-      if (!term) return <span key={`${keyBase}-t${i}`}>{part}</span>
-      const key = `${term.term}-${seq++}`
-      return (
+    if (!sorted.length) return str
+    const nodes = []
+    let cursor = 0
+
+    while (cursor < str.length) {
+      let best = null
+      for (const term of sorted) {
+        const surface = term.matched_text
+        let index = str.indexOf(surface, cursor)
+        while (index >= 0 && !isValidSurfaceMatch(str, index, surface)) {
+          index = str.indexOf(surface, index + 1)
+        }
+        if (index < 0) continue
+        if (
+          !best
+          || index < best.index
+          || (index === best.index && surface.length > best.surface.length)
+        ) {
+          best = { term, surface, index }
+        }
+      }
+
+      if (!best) {
+        nodes.push(<span key={`${keyBase}-tail-${cursor}`}>{str.slice(cursor)}</span>)
+        break
+      }
+
+      if (best.index > cursor) {
+        nodes.push(<span key={`${keyBase}-t${cursor}`}>{str.slice(cursor, best.index)}</span>)
+      }
+
+      const key = `${best.term.term}-${seq++}`
+      nodes.push(
         <button
           key={key}
           type="button"
-          onClick={(e) => toggle(e, key, term)}
+          onClick={(e) => toggle(e, key, best.term)}
           className="cursor-pointer text-emerald-300 underline decoration-dotted decoration-emerald-400/50 underline-offset-4 transition-colors hover:text-emerald-200"
         >
-          {part}
+          {best.surface}
         </button>
       )
-    })
+
+      cursor = best.index + best.surface.length
+    }
+
+    return nodes
   }
 
   function decorate(children, keyBase) {

@@ -39,6 +39,36 @@ def test_extract_term_from_definition_question():
     assert glossary.extract_term_from_query("배고프다") is None
 
 
+def test_find_terms_in_text_does_not_match_cb_inside_pcb():
+    rows = [
+        {
+            "term": "전환사채",
+            "definition": "주식으로 전환할 수 있는 채권입니다.",
+            "aliases": ["CB", "Convertible Bond"],
+        }
+    ]
+
+    assert glossary.find_terms_in_text("PCB 기판 수요가 늘었습니다.", rows) == []
+
+    matches = glossary.find_terms_in_text("전환사채(CB)는 주식 전환 조건을 확인해야 합니다.", rows)
+    assert [match["term"] for match in matches] == ["전환사채"]
+
+
+def test_find_terms_in_text_matches_buy_term():
+    rows = [
+        {
+            "term": "매수",
+            "definition": "주식이나 채권 같은 금융상품을 사는 행위입니다.",
+            "aliases": ["Buy", "매입"],
+        }
+    ]
+
+    matches = glossary.find_terms_in_text("매수는 금융상품을 사는 행위입니다.", rows)
+
+    assert matches[0]["term"] == "매수"
+    assert matches[0]["matched_text"] == "매수"
+
+
 async def test_research_external_term_uses_naver_encyclopedia(monkeypatch):
     monkeypatch.setattr(glossary.settings, "naver_client_id", "client-id")
     monkeypatch.setattr(glossary.settings, "naver_client_secret", "client-secret")
@@ -162,3 +192,29 @@ async def test_search_terms_reads_supabase_and_ranks_locally(monkeypatch):
     matches = await glossary.search_terms("Price Earnings Ratio", limit=1)
 
     assert [match["term"] for match in matches] == ["PER"]
+
+
+async def test_list_all_terms_includes_local_glossary_when_supabase_empty(monkeypatch):
+    class FakeQuery:
+        def select(self, columns):
+            return self
+
+        def limit(self, limit):
+            return self
+
+        async def execute(self):
+            return SimpleNamespace(data=[])
+
+    class FakeClient:
+        def table(self, table_name):
+            assert table_name == "glossary_terms"
+            return FakeQuery()
+
+    async def fake_client():
+        return FakeClient()
+
+    monkeypatch.setattr(glossary, "get_supabase_client", fake_client)
+
+    terms = await glossary.list_all_terms()
+
+    assert any(term["term"] == "매수" for term in terms)
