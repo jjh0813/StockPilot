@@ -27,6 +27,21 @@ function deriveTitle(messages, fallback) {
   return fallback || '새 대화'
 }
 
+function conversationTime(conversation, fallbackIndex = 0) {
+  const value = conversation?.updatedAt || conversation?.createdAt || 0
+  if (typeof value === 'number') return value
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? -fallbackIndex : parsed
+}
+
+function latestConversation(conversations) {
+  if (!conversations.length) return null
+  return conversations
+    .map((conversation, index) => ({ conversation, index }))
+    .sort((a, b) => conversationTime(b.conversation, b.index) - conversationTime(a.conversation, a.index))[0]
+    .conversation
+}
+
 function App() {
   // 로그인 상태로 시작하면 서버에서 불러오므로 빈 배열, 게스트면 로컬에서 복원
   const [conversations, setConversations] = useState(() =>
@@ -68,11 +83,30 @@ function App() {
   function newConversation(seedText = '') {
     const id = 'c-' + Date.now()
     const sessionId = 'web-' + Math.random().toString(36).slice(2)
-    const conv = { id, sessionId, title: '새 대화', messages: [], insights: [], favorite: false, createdAt: Date.now() }
+    const now = Date.now()
+    const conv = {
+      id,
+      sessionId,
+      title: '새 대화',
+      messages: [],
+      insights: [],
+      favorite: false,
+      createdAt: now,
+      updatedAt: now,
+    }
     persist([conv, ...conversations])
     setActiveId(id)
     setStarted(true)
     setSeed({ text: seedText, nonce: Date.now() })
+  }
+
+  function startAnalysis() {
+    const recent = latestConversation(conversations)
+    if (recent) {
+      selectConversation(recent.id)
+      return
+    }
+    newConversation('')
   }
 
   function goHome() {
@@ -90,7 +124,9 @@ function App() {
   function handleMessagesChange(id, messages) {
     setConversations((prev) =>
       prev.map((c) =>
-        c.id === id ? { ...c, messages, title: deriveTitle(messages, c.title) } : c
+        c.id === id
+          ? { ...c, messages, title: deriveTitle(messages, c.title), updatedAt: Date.now() }
+          : c
       )
     )
   }
@@ -102,6 +138,7 @@ function App() {
         c.id === id
           ? {
               ...c,
+              updatedAt: Date.now(),
               insights: (() => {
                 const current = c.insights || []
                 if (!insightKey) return [...current, insight]
@@ -223,7 +260,7 @@ function App() {
             </p>
             <button
               type="button"
-              onClick={() => newConversation('')}
+              onClick={startAnalysis}
               className="rounded-full border border-white/15 bg-white/10 px-8 py-4 text-base font-semibold text-white shadow-lg shadow-black/20 backdrop-blur-lg transition-all hover:scale-[1.03] hover:bg-white/20 active:scale-95"
             >
               분석 시작하기 →
