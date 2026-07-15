@@ -3,6 +3,7 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000/api/v1"
 const TOKEN_KEY = "stockpilot_token";
 const USER_KEY = "stockpilot_user";
 const CONV_KEY = "stockpilot_conversations";
+const DELETED_CONV_KEY = "stockpilot_deleted_conversations";
 
 export function getToken() { return localStorage.getItem(TOKEN_KEY); }
 export function getUsername() { return localStorage.getItem(USER_KEY); }
@@ -23,6 +24,16 @@ export function loadConversations() {
 }
 export function saveConversations(list) {
   localStorage.setItem(CONV_KEY, JSON.stringify(list));
+}
+export function loadDeletedConversationIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(DELETED_CONV_KEY) || "[]")); }
+  catch { return new Set(); }
+}
+export function markConversationDeleted(id) {
+  if (!id) return;
+  const deleted = loadDeletedConversationIds();
+  deleted.add(id);
+  localStorage.setItem(DELETED_CONV_KEY, JSON.stringify([...deleted]));
 }
 
 async function jsonFetch(path, { method = "GET", body, auth = false } = {}) {
@@ -68,7 +79,9 @@ export async function bulkSaveConversations(list) {
   return jsonFetch("/conversations/bulk", { method: "POST", body: list, auth: true });
 }
 export async function deleteConversationRemote(id) {
-  return jsonFetch(`/conversations/${encodeURIComponent(id)}`, { method: "DELETE", auth: true });
+  const data = await jsonFetch(`/conversations/${encodeURIComponent(id)}`, { method: "DELETE", auth: true });
+  if (data?.ok === false) throw new Error("conversation delete failed");
+  return data;
 }
 
 export async function streamChat(message, { sessionId = "web", model, onEvent, signal } = {}) {

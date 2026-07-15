@@ -13,7 +13,9 @@ import {
   fetchConversations,
   getToken,
   getUsername,
+  loadDeletedConversationIds,
   loadConversations,
+  markConversationDeleted,
   saveConversations,
   setAuth,
 } from './lib/api'
@@ -68,6 +70,19 @@ function createConversation({ draft = false } = {}) {
   }
 }
 
+function cleanServerConversations(list) {
+  const deleted = loadDeletedConversationIds()
+  return (Array.isArray(list) ? list : [])
+    .filter(hasConversationContent)
+    .filter((conversation) => !deleted.has(conversation.id))
+}
+
+function retryDeletedConversationDeletes() {
+  const deletedIds = [...loadDeletedConversationIds()]
+  if (!deletedIds.length || !getToken()) return
+  Promise.allSettled(deletedIds.map((id) => deleteConversationRemote(id))).catch(() => {})
+}
+
 function App() {
   // 로그인 상태로 시작하면 서버에서 불러오므로 빈 배열, 게스트면 로컬에서 복원
   const [conversations, setConversations] = useState(() =>
@@ -85,7 +100,8 @@ function App() {
     if (!getToken()) return
     fetchConversations()
       .then((list) => {
-        const loaded = (Array.isArray(list) ? list : []).filter(hasConversationContent)
+        retryDeletedConversationDeletes()
+        const loaded = cleanServerConversations(list)
         if (loaded.length) {
           const pick = latestConversation(loaded)
           setConversations(loaded)
@@ -199,12 +215,14 @@ function App() {
   }
 
   function deleteConversation(id) {
+    markConversationDeleted(id)
     const next = conversations.filter((c) => c.id !== id)
+    const nextVisible = next.filter(hasConversationContent)
     setConversations(next)
     if (username && getToken()) deleteConversationRemote(id).catch(() => {})
     if (activeId === id) {
-      if (next.length > 0) {
-        const sorted = [...next].sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0))
+      if (nextVisible.length > 0) {
+        const sorted = [...nextVisible].sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0))
         setActiveId(sorted[0].id)
         setStarted(true)
       } else {
@@ -222,17 +240,17 @@ function App() {
   async function handleAuthed(name) {
     setUsername(name)
     setShowAuth(false)
-    let list = conversations
+    let list = []
     try {
-      const guest = conversations.filter(hasConversationContent)
-      if (guest.length) await bulkSaveConversations(guest)
       saveConversations([])
+      retryDeletedConversationDeletes()
       const server = await fetchConversations()
-      const serverConversations = (Array.isArray(server) ? server : []).filter(hasConversationContent)
-      list = serverConversations.length ? serverConversations : guest
+      list = cleanServerConversations(server)
       setConversations(list)
     } catch {
-      // 서버 실패 시 현재 대화 유지(앱은 계속 동작)
+      saveConversations([])
+      setConversations([])
+      // 서버 실패 시에도 게스트 대화는 계정 세션으로 넘기지 않는다.
     }
     // 로그인 후: 가장 최근 세션으로 바로 이동한다. 세션이 없으면 빈 세션을 열어
     // "분석 시작하기" 홈 화면이 로그인 직후 다시 뜨지 않게 한다.
