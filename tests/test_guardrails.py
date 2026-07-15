@@ -32,10 +32,12 @@ def test_guardrail_blocks_buy_sell_advice_requests():
         "삼성전자 살까?",
         "삼성전자 매수할까?",
         "삼성전자 매수해도 돼?",
+        "무조건 삼성전자 매수 추천해줘",
         "삼성전자 매도할까?",
         "삼성전자 팔까?",
         "테슬라 추매해도 되나?",
         "엔비디아 손절할까?",
+        "지금 카카오 손절해야 해?",
         "Should I buy Samsung now?",
     ]
 
