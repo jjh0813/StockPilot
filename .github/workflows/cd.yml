@@ -77,6 +77,8 @@ jobs:
             --ssh-key-expire-after=10m \
             --command="bash -s" <<'REMOTE_SCRIPT'
           set -e
+          DEPLOY_REF="${{ env.DEPLOY_REF }}"
+          FRONTEND_AGENT_MODE="${{ env.FRONTEND_AGENT_MODE }}"
 
           DEPLOY_DIR="/home/${USER}/stockpilot"
 
@@ -86,6 +88,8 @@ jobs:
           fi
 
           cd "${DEPLOY_DIR}"
+          echo "Deploying ref: ${DEPLOY_REF}"
+          echo "Frontend agent mode: ${FRONTEND_AGENT_MODE}"
           git fetch origin "${DEPLOY_REF}"
           git checkout -B deploy-target FETCH_HEAD
 
@@ -119,7 +123,7 @@ jobs:
           RAG_EMBEDDING_BATCH_SIZE=${{ secrets.RAG_EMBEDDING_BATCH_SIZE }}
           FRONTEND_PORT=${{ secrets.FRONTEND_PORT }}
           BACKEND_PORT=${{ secrets.BACKEND_PORT }}
-          VITE_AGENT_MODE=${FRONTEND_AGENT_MODE}
+          VITE_AGENT_MODE=${{ env.FRONTEND_AGENT_MODE }}
           ENV_EOF
 
           if docker compose version >/dev/null 2>&1; then
