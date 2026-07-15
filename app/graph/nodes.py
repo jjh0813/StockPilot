@@ -354,7 +354,13 @@ def _materialize_llm_route(
     if intent != "tool":
         return None
 
-    if screen:
+    ticker = matched_stock or (previous_ticker if is_followup else None) or route.get("ticker")
+    ticker = _clean_ticker(str(ticker)) if ticker else None
+
+    # LLM 라우터가 가끔 "삼성전자 어때"처럼 명확한 종목 질문을
+    # screen=true(급등 종목 스크리너)로 과잉 분류한다. 종목 힌트가 있거나
+    # 직전 종목 후속 질문이면 스크리너보다 단일 종목 조회가 항상 우선이다.
+    if screen and not ticker:
         return {
             "intent": "tool",
             "screen": True,
@@ -364,8 +370,16 @@ def _materialize_llm_route(
             "is_followup": False,
         }
 
-    ticker = route.get("ticker") or matched_stock or (previous_ticker if is_followup else None)
-    ticker = _clean_ticker(str(ticker)) if ticker else None
+    if screen:
+        return {
+            "intent": "tool",
+            "screen": False,
+            "ticker": ticker,
+            "tool_mode": tool_mode or "market",
+            "response_mode": response_mode or "market_overview",
+            "is_followup": is_followup and not matched_stock,
+        }
+
     if not ticker:
         return None
 
