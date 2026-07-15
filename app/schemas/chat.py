@@ -9,9 +9,12 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     """클라이언트 → 서버 채팅 요청."""
 
-    agent_mode: Literal["router", "react"] = Field(
+    agent_mode: Literal["router", "react", "full_react"] = Field(
         default="router",
-        description="답변 생성 방식. 기본 router는 기존 MVP 흐름, react는 실험용 ReAct 루프.",
+        description=(
+            "답변 생성 방식. router는 기본 안정 흐름, react는 JSON 기반 실험 루프, "
+            "full_react는 LangGraph prebuilt ReAct 루프."
+        ),
     )
 
     model: Optional[str] = Field(
