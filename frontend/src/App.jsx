@@ -22,6 +22,14 @@ import {
 
 const AURORA_COLORS = ['#052e21', '#34d399', '#065f46']
 const ANALYSIS_HINT = '종목명을 입력하면 등락의 원인을 분석해드려요. (예: 삼성전자)'
+const SESSION_DOMAIN_HINTS = [
+  '주식', '종목', '주가', '시세', '등락', '상승', '하락', '급등', '급락',
+  '뉴스', '공시', 'dart', '재무', '실적', '매출', '영업이익', '순이익',
+  '투자', '투자용어', '용어', '상장', 'ipo', '공모', '청약', '호재', '악재',
+  '리스크', '사업보고서', '분기보고서', '보고서', 'per', 'pbr', 'eps', 'roe',
+  '매수', '매도', '삼성전자', '삼전', 'sk하이닉스', '하이닉스', '한화오션',
+  '셀트리온', '네이버', 'naver', '카카오', '현대차', '기아', 'lg', 'posco',
+]
 
 function deriveTitle(messages, fallback) {
   const firstUser = (messages || []).find((m) => m.role === 'user')
@@ -45,13 +53,42 @@ function latestConversation(conversations) {
     .conversation
 }
 
+function hasConversationPayload(conversation) {
+  return (
+    (conversation?.messages || []).length > 0
+    || (conversation?.insights || []).length > 0
+  )
+}
+
+function hasDomainSignal(conversation) {
+  if ((conversation?.insights || []).length > 0) return true
+
+  const messages = conversation?.messages || []
+  if (
+    messages.some((message) =>
+      message?.price
+      || (message?.sources || []).length > 0
+      || (message?.terms || []).length > 0
+    )
+  ) {
+    return true
+  }
+
+  const userText = messages
+    .filter((message) => message?.role === 'user')
+    .map((message) => message?.text || '')
+    .join(' ')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+
+  return SESSION_DOMAIN_HINTS.some((hint) => userText.includes(hint.toLowerCase().replace(/\s+/g, '')))
+}
+
 function hasConversationContent(conversation) {
   return (
     !conversation?.draft
-    && (
-      (conversation?.messages || []).length > 0
-      || (conversation?.insights || []).length > 0
-    )
+    && hasConversationPayload(conversation)
+    && hasDomainSignal(conversation)
   )
 }
 
@@ -72,7 +109,16 @@ function createConversation({ draft = false } = {}) {
 
 function cleanServerConversations(list) {
   const deleted = loadDeletedConversationIds()
-  return (Array.isArray(list) ? list : [])
+  const source = Array.isArray(list) ? list : []
+  source
+    .filter((conversation) =>
+      conversation?.id
+      && hasConversationPayload(conversation)
+      && (!hasConversationContent(conversation) || deleted.has(conversation.id))
+    )
+    .forEach((conversation) => deleteConversationRemote(conversation.id).catch(() => {}))
+
+  return source
     .filter(hasConversationContent)
     .filter((conversation) => !deleted.has(conversation.id))
 }
@@ -236,13 +282,22 @@ function App() {
     setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, favorite: !c.favorite } : c)))
   }
 
-  // 로그인: 게스트 대화를 내 계정으로 이전 → 로컬 비우고 서버 목록 로드
+  // 로그인: 게스트 대화는 계정으로 이전하지 않고 버린 뒤 서버 목록만 로드
   async function handleAuthed(name) {
-    setUsername(name)
     setShowAuth(false)
+    clearTimeout(syncTimer.current)
+    saveConversations([])
+    setConversations([])
+    setActiveId(null)
+    setSeed(null)
+    setStarted(true)
+    if (typeof window !== 'undefined') {
+      window.location.reload()
+      return
+    }
+    setUsername(name)
     let list = []
     try {
-      saveConversations([])
       retryDeletedConversationDeletes()
       const server = await fetchConversations()
       list = cleanServerConversations(server)
