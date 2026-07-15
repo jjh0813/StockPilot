@@ -190,14 +190,29 @@ function App() {
     } catch {
       // 서버 실패 시 현재 대화 유지(앱은 계속 동작)
     }
-    // 로그인 후: 가장 최신 대화로 바로 이동(의미없는 새 대화 생성 방지). 없으면 시작 화면.
-    const pick = list.find((c) => (c.messages || []).length > 0) || list[0]
+    // 로그인 후: 가장 최근 세션으로 바로 이동한다. 세션이 없으면 빈 세션을 열어
+    // "분석 시작하기" 홈 화면이 로그인 직후 다시 뜨지 않게 한다.
+    const pick = latestConversation(list)
     if (pick) {
       setActiveId(pick.id)
       setStarted(true)
+      setSeed(null)
     } else {
-      setActiveId(null)
-      setStarted(false)
+      const now = Date.now()
+      const conv = {
+        id: 'c-' + now,
+        sessionId: 'web-' + Math.random().toString(36).slice(2),
+        title: '새 대화',
+        messages: [],
+        insights: [],
+        favorite: false,
+        createdAt: now,
+        updatedAt: now,
+      }
+      persist([conv])
+      setActiveId(conv.id)
+      setStarted(true)
+      setSeed(null)
     }
   }
 
