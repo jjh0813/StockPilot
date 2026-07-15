@@ -185,6 +185,36 @@ def test_blocked_recommendation_preserves_existing_valid_ticker_context(mock_too
     assert followup_events[-1]["type"] == "done"
 
 
+def test_generic_recommendation_is_blocked_between_followups(mock_tools):
+    session_id = "guardrail-generic-recommend-between-followups"
+    initial = client.post(
+        "/api/v1/chat/stream",
+        json={"message": "카카오 요즘 어때", "session_id": session_id},
+    )
+    assert initial.status_code == 200
+    assert any(event["type"] == "tool" for event in _parse_sse(initial.text))
+
+    blocked = client.post(
+        "/api/v1/chat/stream",
+        json={"message": "추천해줘", "session_id": session_id},
+    )
+    assert blocked.status_code == 200
+    blocked_events = _parse_sse(blocked.text)
+    assert blocked_events[0]["type"] == "error"
+    assert "매수·매도 여부는 추천할 수 없습니다" in blocked_events[0]["error"]
+    assert all(event["type"] != "tool" for event in blocked_events)
+
+    followup = client.post(
+        "/api/v1/chat/stream",
+        json={"message": "왜 올랐어?", "session_id": session_id},
+    )
+    assert followup.status_code == 200
+    followup_events = _parse_sse(followup.text)
+    tool_event = next(event for event in followup_events if event["type"] == "tool")
+    assert tool_event["tool_name"] == "get_stock_price,get_news,get_disclosure"
+    assert followup_events[-1]["type"] == "done"
+
+
 def test_chat_stream_suppresses_raw_tokens_when_direction_notice_exists(monkeypatch):
     notice = "아닙니다. 현재 삼성전자는 상승 중입니다. 아래는 최근 상승과 관련 있어 보이는 주요 이유입니다."
 
