@@ -35,17 +35,43 @@ function conversationTime(conversation, fallbackIndex = 0) {
 }
 
 function latestConversation(conversations) {
-  if (!conversations.length) return null
-  return conversations
+  const candidates = conversations.filter(hasConversationContent)
+  if (!candidates.length) return null
+  return candidates
     .map((conversation, index) => ({ conversation, index }))
     .sort((a, b) => conversationTime(b.conversation, b.index) - conversationTime(a.conversation, a.index))[0]
     .conversation
 }
 
+function hasConversationContent(conversation) {
+  return (
+    !conversation?.draft
+    && (
+      (conversation?.messages || []).length > 0
+      || (conversation?.insights || []).length > 0
+    )
+  )
+}
+
+function createConversation({ draft = false } = {}) {
+  const now = Date.now()
+  return {
+    id: 'c-' + now,
+    sessionId: 'web-' + Math.random().toString(36).slice(2),
+    title: '새 대화',
+    messages: [],
+    insights: [],
+    favorite: false,
+    createdAt: now,
+    updatedAt: now,
+    draft,
+  }
+}
+
 function App() {
   // 로그인 상태로 시작하면 서버에서 불러오므로 빈 배열, 게스트면 로컬에서 복원
   const [conversations, setConversations] = useState(() =>
-    getToken() ? [] : loadConversations().filter((c) => (c.messages || []).length > 0)
+    getToken() ? [] : loadConversations().filter(hasConversationContent)
   )
   const [activeId, setActiveId] = useState(null)
   const [started, setStarted] = useState(false)
@@ -58,21 +84,43 @@ function App() {
   useEffect(() => {
     if (!getToken()) return
     fetchConversations()
-      .then((list) => setConversations(Array.isArray(list) ? list : []))
-      .catch(() => {})
+      .then((list) => {
+        const loaded = (Array.isArray(list) ? list : []).filter(hasConversationContent)
+        if (loaded.length) {
+          const pick = latestConversation(loaded)
+          setConversations(loaded)
+          setActiveId(pick.id)
+          setStarted(true)
+          setSeed(null)
+        } else {
+          const draft = createConversation({ draft: true })
+          setConversations([draft])
+          setActiveId(draft.id)
+          setStarted(true)
+          setSeed(null)
+        }
+      })
+      .catch(() => {
+        const draft = createConversation({ draft: true })
+        setConversations([draft])
+        setActiveId(draft.id)
+        setStarted(true)
+        setSeed(null)
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // 저장: 로그인=서버(디바운스), 게스트=로컬 (둘을 분리해 서로 안 섞임)
   useEffect(() => {
+    const storable = conversations.filter(hasConversationContent)
     if (username && getToken()) {
       clearTimeout(syncTimer.current)
       syncTimer.current = setTimeout(() => {
-        bulkSaveConversations(conversations).catch(() => {})
+        if (storable.length) bulkSaveConversations(storable).catch(() => {})
       }, 700)
       return () => clearTimeout(syncTimer.current)
     }
-    saveConversations(conversations)
+    saveConversations(storable)
     return undefined
   }, [conversations, username])
 
@@ -81,21 +129,9 @@ function App() {
   }
 
   function newConversation(seedText = '') {
-    const id = 'c-' + Date.now()
-    const sessionId = 'web-' + Math.random().toString(36).slice(2)
-    const now = Date.now()
-    const conv = {
-      id,
-      sessionId,
-      title: '새 대화',
-      messages: [],
-      insights: [],
-      favorite: false,
-      createdAt: now,
-      updatedAt: now,
-    }
+    const conv = createConversation()
     persist([conv, ...conversations])
-    setActiveId(id)
+    setActiveId(conv.id)
     setStarted(true)
     setSeed({ text: seedText, nonce: Date.now() })
   }
@@ -125,7 +161,13 @@ function App() {
     setConversations((prev) =>
       prev.map((c) =>
         c.id === id
-          ? { ...c, messages, title: deriveTitle(messages, c.title), updatedAt: Date.now() }
+          ? {
+              ...c,
+              messages,
+              title: deriveTitle(messages, c.title),
+              updatedAt: Date.now(),
+              draft: messages.length > 0 ? false : c.draft,
+            }
           : c
       )
     )
@@ -139,6 +181,7 @@ function App() {
           ? {
               ...c,
               updatedAt: Date.now(),
+              draft: false,
               insights: (() => {
                 const current = c.insights || []
                 if (!insightKey) return [...current, insight]
@@ -181,11 +224,12 @@ function App() {
     setShowAuth(false)
     let list = conversations
     try {
-      const guest = conversations
+      const guest = conversations.filter(hasConversationContent)
       if (guest.length) await bulkSaveConversations(guest)
       saveConversations([])
       const server = await fetchConversations()
-      list = Array.isArray(server) && server.length ? server : guest
+      const serverConversations = (Array.isArray(server) ? server : []).filter(hasConversationContent)
+      list = serverConversations.length ? serverConversations : guest
       setConversations(list)
     } catch {
       // 서버 실패 시 현재 대화 유지(앱은 계속 동작)
@@ -198,18 +242,8 @@ function App() {
       setStarted(true)
       setSeed(null)
     } else {
-      const now = Date.now()
-      const conv = {
-        id: 'c-' + now,
-        sessionId: 'web-' + Math.random().toString(36).slice(2),
-        title: '새 대화',
-        messages: [],
-        insights: [],
-        favorite: false,
-        createdAt: now,
-        updatedAt: now,
-      }
-      persist([conv])
+      const conv = createConversation({ draft: true })
+      setConversations([conv])
       setActiveId(conv.id)
       setStarted(true)
       setSeed(null)
@@ -227,6 +261,7 @@ function App() {
   }
 
   const active = conversations.find((c) => c.id === activeId) || null
+  const visibleConversations = conversations.filter(hasConversationContent)
   const insights = active?.insights || []
   const hasInsight = insights.length > 0
 
@@ -245,7 +280,7 @@ function App() {
 
       <Sidebar
         visible={started}
-        conversations={conversations}
+        conversations={visibleConversations}
         activeId={activeId}
         onSelect={selectConversation}
         onNew={() => newConversation('')}
