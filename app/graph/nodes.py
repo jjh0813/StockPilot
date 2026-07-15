@@ -1428,7 +1428,10 @@ async def response_node(state: StockPilotState) -> dict:
             "used_model": "template-direction-correction",
         }
 
-    if intent == "tool" and price and _is_market_overview_question(user_text):
+    if intent == "tool" and price and (
+        state.get("response_mode") == "market_overview"
+        or _is_market_overview_question(user_text)
+    ):
         logger.info("💬 [Response] 시장 현황 요약 템플릿 응답 생성 완료")
         answer = sanitize_llm_output(_market_overview_answer(price))
         return {
