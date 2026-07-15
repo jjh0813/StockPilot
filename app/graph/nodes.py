@@ -331,6 +331,19 @@ def _materialize_llm_route(
     tool_mode = route.get("tool_mode")
     response_mode = route.get("answer_mode")
 
+    # 명확한 종목명이 룰 기반으로 잡혔는데 LLM이 chat으로 보내면
+    # "삼성전자 어때" 같은 핵심 질문이 범위 밖 안내로 빠진다. 이 경우는
+    # 단일 종목 시장 조회가 더 안전한 기본값이다.
+    if intent == "chat" and matched_stock:
+        return {
+            "intent": "tool",
+            "screen": False,
+            "ticker": matched_stock,
+            "tool_mode": "market",
+            "response_mode": response_mode or "market_overview",
+            "is_followup": False,
+        }
+
     if intent == "chat":
         return {
             "intent": "chat",

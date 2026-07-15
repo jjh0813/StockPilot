@@ -200,6 +200,31 @@ async def test_router_node_ignores_llm_screener_when_stock_is_explicit(monkeypat
     assert result["tool_mode"] == "market"
 
 
+async def test_router_node_ignores_llm_chat_when_stock_is_explicit(monkeypatch):
+    async def fake_llm_route(query: str, **kwargs):
+        assert query == "삼성전자 어때"
+        assert kwargs["matched_stock"] == "삼성전자"
+        return {
+            "intent": "chat",
+            "screen": False,
+            "tool_mode": None,
+            "ticker": None,
+            "answer_mode": None,
+        }
+
+    monkeypatch.setattr("app.graph.nodes._llm_route_query", fake_llm_route)
+
+    state = create_initial_state("explicit-stock-over-chat")
+    state["messages"] = [HumanMessage(content="삼성전자 어때")]
+
+    result = await router_node(state)
+
+    assert result["intent"] == "tool"
+    assert result["screen"] is False
+    assert result["ticker"] == "삼성전자"
+    assert result["tool_mode"] == "market"
+
+
 async def test_router_node_disclosure_risk_concept_is_rag():
     state = create_initial_state("disclosure-risk-concept")
     state["messages"] = [HumanMessage(content="공시 리스크 뭐야")]
