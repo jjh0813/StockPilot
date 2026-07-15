@@ -210,6 +210,51 @@ def _augment_user_message(message: str) -> str:
     return message
 
 
+def _format_generic_recommendation_answer(result: dict[str, Any]) -> str:
+    """Format the positive-news screener as non-advisory candidate evidence."""
+
+    stocks = (result.get("data") or {}).get("stocks") or []
+    if not stocks:
+        return (
+            "현재 기준으로 상승 근거가 확인되는 국내 종목 후보를 찾지 못했어요.\n\n"
+            "※ 투자 자문이 아닌 참고 정보입니다."
+        )
+
+    lines = ["### 📈 요즘 상승 근거가 확인된 참고 후보", ""]
+    for stock in stocks[:6]:
+        name = stock.get("ticker") or "종목"
+        change_pct = stock.get("change_pct")
+        headline = stock.get("top_news") or "관련 뉴스 확인"
+        if isinstance(change_pct, (int, float)):
+            lines.append(f"- **{name}** (▲{change_pct:.2f}%) — {headline}")
+        else:
+            lines.append(f"- **{name}** — {headline}")
+
+    lines.extend(
+        [
+            "",
+            "위 목록은 최근 등락률과 상승 근거 뉴스가 함께 확인된 참고 후보입니다.",
+            "특정 종목의 매수·매도 추천이나 미래 주가 예측은 제공하지 않습니다.",
+            "",
+            "※ 투자 자문이 아닌 참고 정보입니다.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+async def _run_generic_recommendation_route() -> FullReactAgentResult:
+    """Deterministically route generic candidate requests to the screener tool."""
+
+    result = await _EXECUTOR.execute("find_positive_news_stocks", {})
+    answer = _format_generic_recommendation_answer(result)
+    return FullReactAgentResult(
+        answer=answer,
+        tool_used="find_positive_news_stocks",
+        used_model="tool-router",
+        steps=[{"tool": "find_positive_news_stocks", "result": result}],
+    )
+
+
 @lru_cache(maxsize=64)
 def _get_full_react_graph(session_id: str, model_id: str | None = None):
     """Compile a ReAct graph bound to one session's tools.
@@ -324,6 +369,9 @@ async def run_full_react_agent(
     if direct:
         return FullReactAgentResult(answer=direct, used_model="scope-guard")
 
+    if _is_generic_recommendation(message):
+        return await _run_generic_recommendation_route()
+
     graph = _get_full_react_graph(session_id, model_id)
     augmented_message = _augment_user_message(message)
     result = await graph.ainvoke(
@@ -366,6 +414,28 @@ async def stream_full_react_agent(
             "content": direct,
             "tool_used": None,
             "model": "scope-guard",
+        }
+        return
+
+    if _is_generic_recommendation(message):
+        yield {
+            "type": "thinking",
+            "node": "full_react",
+            "content": "요즘 상승 근거가 확인되는 국내 종목 후보를 찾고 있어요.",
+        }
+        result = await _EXECUTOR.execute("find_positive_news_stocks", {})
+        yield {
+            "type": "tool",
+            "node": "full_react",
+            "tool_name": "find_positive_news_stocks",
+            "tool_result": _tool_stream_payload("find_positive_news_stocks", result),
+        }
+        yield {
+            "type": "response",
+            "node": "full_react",
+            "content": _format_generic_recommendation_answer(result),
+            "tool_used": "find_positive_news_stocks",
+            "model": "tool-router",
         }
         return
 
