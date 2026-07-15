@@ -69,6 +69,17 @@
     "source_url": "https://data.krx.co.kr/"
   },
   {
+    "term": "공시",
+    "aliases": [
+      "전자공시",
+      "DART",
+      "Disclosure"
+    ],
+    "definition": "회사가 투자자에게 중요한 정보를 공식적으로 공개하는 것을 말합니다. 실적, 계약, 증자, 소송, 경영진 변동처럼 주가 판단에 영향을 줄 수 있는 내용이 포함될 수 있어 뉴스보다 원문과 제출일을 함께 확인하는 것이 중요합니다.",
+    "example": "한 회사가 대규모 공급계약을 체결하면 '단일판매ㆍ공급계약체결' 같은 공시로 내용을 확인할 수 있습니다.",
+    "source_url": "https://opendart.fss.or.kr/guide/main.do?apiGrpCd=DS001"
+  },
+  {
     "term": "사업보고서",
     "aliases": [
       "정기보고서",

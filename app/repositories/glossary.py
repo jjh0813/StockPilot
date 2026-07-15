@@ -8,6 +8,7 @@ table so tools can do exact/alias lookup before falling back to document RAG.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from functools import lru_cache
 import hashlib
 import html
 import json
@@ -45,6 +46,10 @@ _INVESTMENT_RESEARCH_HINTS = (
 )
 
 _SPECIAL_TERMS_ENDING_WITH_PARTICLE = ("목표주가", "적정주가", "주가")
+_DEFINITION_PHRASE = (
+    r"뭐야|뭔데|무슨\s*뜻|무슨\s*의미|뭔\s*의미|"
+    r"뜻이야|뜻은|뜻|의미야|의미냐고|의미|설명해|설명"
+)
 
 
 def load_glossary_terms(path: Path) -> list[dict[str, Any]]:
@@ -59,6 +64,20 @@ def load_glossary_terms(path: Path) -> list[dict[str, Any]]:
         if not entry.get("term") or not entry.get("definition"):
             raise ValueError(f"glossary entry {index} needs term and definition.")
     return entries
+
+
+@lru_cache(maxsize=1)
+def load_local_glossary_rows() -> list[dict[str, Any]]:
+    """Load bundled glossary JSON as a safe fallback when Supabase is sparse."""
+    path = Path(__file__).resolve().parents[2] / "data" / "glossary.json"
+    try:
+        return [
+            _entry_to_row(entry, updated_at="")
+            for entry in load_glossary_terms(path)
+        ]
+    except Exception as exc:
+        logger.warning(f"로컬 용어 사전 로드 실패: {type(exc).__name__}: {exc}")
+        return []
 
 
 async def ingest_glossary_terms(path: Path) -> int:
@@ -83,14 +102,25 @@ async def search_terms(query: str, *, limit: int = 5) -> list[dict[str, Any]]:
     if not query.strip():
         return []
 
-    client = await get_supabase_client()
-    result = await (
-        client.table("glossary_terms")
-        .select(GLOSSARY_COLUMNS)
-        .limit(1000)
-        .execute()
+    rows: list[dict[str, Any]] = []
+    try:
+        client = await get_supabase_client()
+        result = await (
+            client.table("glossary_terms")
+            .select(GLOSSARY_COLUMNS)
+            .limit(1000)
+            .execute()
+        )
+        rows = [_normalize_row(row) for row in (result.data or [])]
+    except Exception as exc:
+        logger.warning(f"Supabase 용어 사전 조회 실패, 로컬 사전으로 대체: {type(exc).__name__}: {exc}")
+
+    existing_terms = {str(row.get("term") or "").casefold() for row in rows}
+    rows.extend(
+        row
+        for row in load_local_glossary_rows()
+        if str(row.get("term") or "").casefold() not in existing_terms
     )
-    rows = [_normalize_row(row) for row in (result.data or [])]
     return rank_glossary_terms(rows, query, limit=limit)
 
 
@@ -261,15 +291,16 @@ def extract_term_from_query(query: str) -> str | None:
 
     for term in _SPECIAL_TERMS_ENDING_WITH_PARTICLE:
         if re.search(
-            rf"{re.escape(term)}\s*(?:뭐야|무슨\s*뜻|뜻이야|뜻은|뜻|설명해|설명)",
+            rf"{re.escape(term)}\s*(?:{_DEFINITION_PHRASE})",
             text,
             flags=re.IGNORECASE,
         ):
             return term
 
     patterns = (
-        r"^(.+?)(?:이|가|은|는)?\s*(?:뭐야|무슨\s*뜻|뜻이야|뜻은|뜻|설명해|설명)",
-        r"^(?:주식|투자|증권)\s+(.+?)\s*(?:뭐야|무슨\s*뜻|뜻|설명)",
+        rf"^(.+?)(?:이라는|라는|이란|란)?\s*단어(?:가|는|은)?\s*(?:{_DEFINITION_PHRASE})",
+        rf"^(.+?)(?:이|가|은|는)?\s*(?:{_DEFINITION_PHRASE})",
+        rf"^(?:주식|투자|증권)\s+(.+?)\s*(?:{_DEFINITION_PHRASE})",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -284,7 +315,8 @@ def extract_term_from_query(query: str) -> str | None:
 def _clean_extracted_term(value: str) -> str | None:
     cleaned = value.strip(" ?!.,。！？\"'“”‘’")
     cleaned = re.sub(r"^(주식|투자|증권|금융)\s+", "", cleaned)
-    cleaned = re.sub(r"(이라는|이란|란|은|는)$", "", cleaned).strip()
+    cleaned = re.sub(r"\s*(?:이라는|라는|이란|란)?\s*단어$", "", cleaned).strip()
+    cleaned = re.sub(r"(이라는|라는|이란|란|은|는)$", "", cleaned).strip()
     if not cleaned or len(cleaned) > 40:
         return None
     return cleaned

@@ -141,6 +141,31 @@ async def test_router_node_followup_disclosure_uses_previous_ticker():
     assert result["tool_mode"] == "disclosure"
 
 
+async def test_router_node_followup_disclosure_definition_is_rag():
+    state = create_initial_state("disclosure-definition-followup")
+    state["messages"] = [HumanMessage(content="삼성전자 요즘 어때?")]
+    await router_node(state)
+
+    state = create_initial_state("disclosure-definition-followup")
+    state["messages"] = [HumanMessage(content="공시가 뭔데?")]
+    result = await router_node(state)
+
+    assert result["intent"] == "rag"
+    assert result["screen"] is False
+    assert result.get("tool_mode") is None
+
+
+async def test_router_node_disclosure_word_meaning_is_rag():
+    state = create_initial_state("disclosure-word-meaning")
+    state["messages"] = [HumanMessage(content="공시라는 단어가 뭔 의미냐고")]
+
+    result = await router_node(state)
+
+    assert result["intent"] == "rag"
+    assert result["screen"] is False
+    assert result.get("tool_mode") is None
+
+
 async def test_router_node_followup_cause_reuses_previous_ticker():
     state = create_initial_state("cause-followup")
     state["messages"] = [HumanMessage(content="삼성전자 요즘 어때?")]
