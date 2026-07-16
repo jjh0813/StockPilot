@@ -72,11 +72,15 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
-  const [model, setModel] = useState(() => {
-    try { return localStorage.getItem('sp_model') || 'solar' } catch { return 'solar' }
-  })
+  const [model, setModel] = useState('solar')
   const listRef = useRef(null)
   const shouldScrollRef = useRef(false)
+
+  useEffect(() => {
+    // 발표/시연 기본값은 Solar로 고정한다. 예전에 GPT/Gemini/Claude를 선택한
+    // 값이 브라우저 localStorage에 남아 있으면 불필요한 폴백 경고가 반복될 수 있다.
+    try { localStorage.setItem('sp_model', 'solar') } catch { /* 무시 */ }
+  }, [])
 
   // 새 메시지를 "입력"했을 때만 맨 아래로 스크롤한다(입력 순간 한 번).
   // 이후 응답 스트리밍 중에는 스크롤을 건드리지 않아 화면이 흔들리지 않는다.

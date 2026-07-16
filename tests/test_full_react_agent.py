@@ -113,7 +113,7 @@ def _fake_disclosure(name: str) -> dict:
     }
 
 
-async def test_full_react_single_stock_overview_uses_flow_template(monkeypatch):
+async def test_full_react_single_stock_overview_collects_evidence_then_generates_answer(monkeypatch):
     calls: list[tuple[str, dict]] = []
 
     async def fake_execute(tool_name: str, args: dict, session_id: str = "default"):
@@ -133,6 +133,11 @@ async def test_full_react_single_stock_overview_uses_flow_template(monkeypatch):
     monkeypatch.setattr(full_react_agent._EXECUTOR, "execute", fake_execute)
     monkeypatch.setattr(full_react_agent, "_get_full_react_graph", fail_if_graph_is_used)
 
+    async def fake_generate_answer(panel: dict, model_id: str | None = None):
+        return "카카오는 최근 흐름과 하루 등락을 함께 보면 이런 상황입니다.", "solar-pro3-260323"
+
+    monkeypatch.setattr(full_react_agent, "_generate_stock_overview_answer", fake_generate_answer)
+
     events = [
         event
         async for event in full_react_agent.stream_full_react_agent(
@@ -145,8 +150,8 @@ async def test_full_react_single_stock_overview_uses_flow_template(monkeypatch):
     tool_calls = [call[0] for call in calls]
     assert tool_calls == ["get_stock_price", "get_news", "get_disclosure"]
     assert [event["type"] for event in events] == ["thinking", "tool", "tool", "tool", "response"]
-    assert events[-1]["model"] == "template-market-overview"
-    assert "요즘 흐름" in events[-1]["content"]
+    assert events[-1]["model"] == "solar-pro3-260323"
+    assert "최근 흐름" in events[-1]["content"]
     assert "카카오" in events[-1]["content"]
 
 

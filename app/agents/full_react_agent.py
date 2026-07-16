@@ -20,14 +20,14 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
 from loguru import logger
 
 from app.agents.react_agent import _tool_stream_payload
 from app.core.guardrails import sanitize_llm_output
-from app.core.llm import get_llm
+from app.core.llm import ainvoke_with_fallback, get_llm
 from app.core.observability import langfuse_config
 from app.repositories.price import KNOWN_TICKER_NAMES
 from app.tools.executor import ToolExecutor
@@ -556,19 +556,96 @@ def _format_stock_overview_answer(panel: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _stock_overview_evidence(panel: dict[str, Any]) -> dict[str, Any]:
+    price_data = (panel.get("price_result") or {}).get("data") or {}
+    news_items = ((panel.get("news_result") or {}).get("data") or {}).get("news") or []
+    disclosures = ((panel.get("disclosure_result") or {}).get("data") or {}).get("disclosures") or []
+    ohlcv = price_data.get("ohlcv") or []
+    trend_text, trend_pct = _recent_trend_from_ohlcv(ohlcv)
+    return {
+        "stock": {
+            "name": price_data.get("name") or panel.get("stock"),
+            "ticker": price_data.get("ticker"),
+            "current_price": price_data.get("current_price"),
+            "change_pct": price_data.get("change_pct"),
+            "as_of": _format_date_text(price_data.get("as_of")),
+            "snapshot_at": _format_datetime_text(price_data.get("snapshot_at")),
+            "period": _period_label(price_data.get("period"), len(ohlcv)),
+            "recent_trend_text": trend_text,
+            "recent_trend_pct": trend_pct,
+        },
+        "news": [
+            {
+                "title": item.get("title"),
+                "source": item.get("source"),
+                "url": item.get("url"),
+                "published_at": item.get("published_at") or item.get("date"),
+            }
+            for item in news_items[:5]
+        ],
+        "disclosures": [
+            {
+                "title": item.get("report_name") or item.get("title"),
+                "date": item.get("received_date") or item.get("date"),
+                "url": item.get("source_url") or item.get("url"),
+            }
+            for item in disclosures[:5]
+        ],
+    }
+
+
+async def _generate_stock_overview_answer(
+    panel: dict[str, Any],
+    *,
+    model_id: str | None = None,
+) -> tuple[str, str | None]:
+    """Use Solar to turn required price/news/disclosure evidence into natural prose."""
+
+    evidence = _stock_overview_evidence(panel)
+    prompt = (
+        "아래 JSON 근거만 사용해서 사용자의 '요즘 어때?' 질문에 답해라.\n"
+        "답변은 템플릿처럼 딱딱하지 않게, 자연스럽고 초보자 친화적인 한국어로 작성한다.\n"
+        "단, 다음 기준은 반드시 지킨다:\n"
+        "- 첫 문단에서 최근 흐름과 기준일 하루 등락을 구분해서 설명한다.\n"
+        "- 뉴스와 공시는 '가능한 배경/확인 포인트'로만 말하고, 확정적 인과처럼 단정하지 않는다.\n"
+        "- 매수/매도 추천, 목표가, 미래 주가 예측은 하지 않는다.\n"
+        "- 내부 도구명(get_stock_price 등)은 쓰지 않는다.\n"
+        "- 마지막에는 사용자가 이어서 물어볼 수 있게 '왜 올랐어/왜 떨어졌어' 중 현재 등락 방향에 맞는 질문을 자연스럽게 안내한다.\n"
+        "- 끝에 '※ 투자 자문이 아닌 참고 정보입니다.'를 붙인다.\n\n"
+        f"근거 JSON:\n{json.dumps(evidence, ensure_ascii=False, indent=2)}"
+    )
+    try:
+        result = await ainvoke_with_fallback(
+            [
+                SystemMessage(content="너는 StockPilot의 근거 기반 주식 리서치 답변 작성자다."),
+                HumanMessage(content=prompt),
+            ],
+            model_id=model_id or "solar",
+            timeout_seconds=35,
+        )
+        answer = sanitize_llm_output(_content_to_text(result.message.content))
+        if answer:
+            return answer, result.model_name or result.model_id
+    except Exception as exc:
+        logger.warning(f"Stock overview LLM generation failed, using fallback template: {type(exc).__name__}")
+    return _format_stock_overview_answer(panel), "template-fallback"
+
+
 async def _run_stock_overview_route(
     *,
     message: str,
     session_id: str,
+    model_id: str | None = None,
 ) -> FullReactAgentResult:
     """Deterministically handle single-stock overview requests."""
 
     stock = _extract_stock_mentions(message)[0]
     panel = (await _fetch_multi_stock_overview([stock], session_id=session_id))[0]
+    answer, used_model = await _generate_stock_overview_answer(panel, model_id=model_id)
     return FullReactAgentResult(
-        answer=_format_stock_overview_answer(panel),
+        answer=answer,
         tool_used="get_stock_price,get_news,get_disclosure",
-        used_model="template-market-overview",
+        used_model=used_model,
         steps=[
             {"tool": "get_stock_price", "result": panel["price_result"]},
             {"tool": "get_news", "result": panel["news_result"]},
@@ -773,6 +850,7 @@ async def run_full_react_agent(
         return await _run_stock_overview_route(
             message=message,
             session_id=session_id,
+            model_id=model_id,
         )
 
     graph = _get_full_react_graph(session_id, model_id)
@@ -888,12 +966,13 @@ async def stream_full_react_agent(
                 "tool_name": tool_name,
                 "tool_result": _tool_stream_payload(tool_name, panel[result_key]),
             }
+        answer, used_model = await _generate_stock_overview_answer(panel, model_id=model_id)
         yield {
             "type": "response",
             "node": "full_react",
-            "content": _format_stock_overview_answer(panel),
+            "content": answer,
             "tool_used": "get_stock_price,get_news,get_disclosure",
-            "model": "template-market-overview",
+            "model": used_model,
         }
         return
 
