@@ -75,6 +75,7 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
   const [model, setModel] = useState('solar')
   const listRef = useRef(null)
   const shouldScrollRef = useRef(false)
+  const stickToBottomRef = useRef(true)
 
   useEffect(() => {
     // 발표/시연 기본값은 Solar로 고정한다. 예전에 GPT/Gemini/Claude를 선택한
@@ -82,14 +83,33 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
     try { localStorage.setItem('sp_model', 'solar') } catch { /* 무시 */ }
   }, [])
 
-  // 새 메시지를 "입력"했을 때만 맨 아래로 스크롤한다(입력 순간 한 번).
-  // 이후 응답 스트리밍 중에는 스크롤을 건드리지 않아 화면이 흔들리지 않는다.
-  useEffect(() => {
+  function scrollMessagesToBottom(behavior = 'smooth') {
     const el = listRef.current
-    if (!el || !shouldScrollRef.current) return
-    el.scrollTop = el.scrollHeight
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior })
+  }
+
+  function handleMessageScroll() {
+    const el = listRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    stickToBottomRef.current = distanceFromBottom < 120
+  }
+
+  // 입력 순간에는 항상 맨 아래로 내린다.
+  useEffect(() => {
+    if (!shouldScrollRef.current) return
+    scrollMessagesToBottom('auto')
     shouldScrollRef.current = false
   }, [messages])
+
+  // 답변 스트리밍 중에는 사용자가 하단 근처를 보고 있을 때만 따라 내려간다.
+  // 사용자가 위로 올려 과거 답변을 읽는 중이면 자동 스크롤로 방해하지 않는다.
+  useEffect(() => {
+    if (!busy || !stickToBottomRef.current) return
+    const frame = requestAnimationFrame(() => scrollMessagesToBottom('smooth'))
+    return () => cancelAnimationFrame(frame)
+  }, [messages, busy])
 
   useEffect(() => {
     onMessagesChange(messages)
@@ -116,7 +136,8 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
     busyRef.current = true
     setBusy(true)
     setInput('')
-    shouldScrollRef.current = true   // 입력 순간에만 맨 아래로 내림
+    shouldScrollRef.current = true
+    stickToBottomRef.current = true
     setMessages((prev) => [
       ...prev,
       { role: 'user', text: query },
@@ -250,7 +271,11 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {/* 메시지 영역: 이 컨테이너 안에서만 스크롤 */}
-      <div ref={listRef} className="no-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto pb-4">
+      <div
+        ref={listRef}
+        onScroll={handleMessageScroll}
+        className="no-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto pb-4"
+      >
         {messages.length === 0 && (
           <p className="mt-4 text-center text-neutral-400">
             {hint || '종목명을 입력하면 등락의 원인을 분석해드려요. (예: 삼성전자)'}
