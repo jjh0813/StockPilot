@@ -229,6 +229,67 @@ def contains_price_prediction(text: str) -> bool:
     return any(pattern.search(text or "") for pattern in _PRICE_PREDICTION_OUTPUT_PATTERNS)
 
 
+_INTERNAL_TOOL_CITATION_RE = re.compile(
+    r"\b(?:get_stock_price|get_news|get_disclosure|find_positive_news_stocks|"
+    r"lookup_glossary(?:_term)?|add_watchlist)\b"
+)
+_SOURCE_HEADING_RE = re.compile(r"^(?:#{1,6}\s*)?(?:\*\*)?\s*출처\s*(?:\*\*)?\s*:?\s*$")
+
+
+def remove_internal_tool_citations(text: str) -> str:
+    """Remove LLM-leaked internal tool names from user-facing answers.
+
+    Tool names such as ``get_stock_price`` are implementation details, not
+    user-verifiable sources. Real sources should be shown via news/DART links
+    or the UI source cards.
+    """
+
+    if not text or not _INTERNAL_TOOL_CITATION_RE.search(text):
+        return text
+
+    lines = text.splitlines()
+    cleaned: list[str] = []
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+
+        if _SOURCE_HEADING_RE.match(stripped):
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+
+            k = j
+            while k < len(lines):
+                current = lines[k].strip()
+                if not current or INVESTMENT_DISCLAIMER in current or _SOURCE_HEADING_RE.match(current):
+                    break
+                k += 1
+
+            block = lines[j:k]
+            if block and any(_INTERNAL_TOOL_CITATION_RE.search(line) for line in block):
+                kept = [
+                    line
+                    for line in block
+                    if line.strip() and not _INTERNAL_TOOL_CITATION_RE.search(line)
+                ]
+                if kept:
+                    cleaned.append(lines[i])
+                    cleaned.extend(kept)
+                i = k
+                continue
+
+        if _INTERNAL_TOOL_CITATION_RE.search(stripped):
+            i += 1
+            continue
+
+        cleaned.append(lines[i])
+        i += 1
+
+    result = "\n".join(cleaned)
+    result = re.sub(r"\n{3,}", "\n\n", result).strip()
+    return result
+
+
 def sanitize_llm_output(text: str) -> str:
     """Apply post-call guardrails to an LLM answer.
 
@@ -247,6 +308,7 @@ def sanitize_llm_output(text: str) -> str:
     )
     safe = re.sub(r"(상승|하락)\s*가능성", r"\1 근거", safe)
     safe = mask_sensitive_text(safe)
+    safe = remove_internal_tool_citations(safe)
     if contains_buy_sell_recommendation(safe):
         safe = NO_INVESTMENT_RECOMMENDATION_MESSAGE
     if contains_price_prediction(safe):

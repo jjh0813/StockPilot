@@ -6,6 +6,7 @@ from app.core.guardrails import (
     contains_buy_sell_recommendation,
     contains_price_prediction,
     mask_sensitive_text,
+    remove_internal_tool_citations,
     sanitize_llm_output,
 )
 
@@ -121,3 +122,35 @@ def test_guardrail_masks_sensitive_text():
     assert "sk-abcdefghijklmnopqrstuvwxyz" not in masked
     assert "[REDACTED_EMAIL]" in masked
     assert "[REDACTED_API_KEY]" in masked
+
+
+def test_guardrail_removes_internal_tool_citation_block():
+    output = sanitize_llm_output(
+        """삼성전자는 최근 변동성이 큽니다.
+
+**출처**
+
+현재가·변동률: get_stock_price (ticker 005930, period 3m)
+공시: get_disclosure (ticker 삼성전자)
+뉴스: get_news (company 삼성전자, days 7)
+"""
+    )
+
+    assert "get_stock_price" not in output
+    assert "get_disclosure" not in output
+    assert "get_news" not in output
+    assert "현재가·변동률" not in output
+    assert "삼성전자는 최근 변동성이 큽니다." in output
+    assert INVESTMENT_DISCLAIMER in output
+
+
+def test_remove_internal_tool_citations_keeps_real_source_lines():
+    output = remove_internal_tool_citations(
+        """**출처**
+뉴스: https://example.com/article
+공시: get_disclosure (ticker 삼성전자)
+"""
+    )
+
+    assert "https://example.com/article" in output
+    assert "get_disclosure" not in output
