@@ -212,6 +212,19 @@ def _is_multi_stock_overview(message: str) -> bool:
     )
 
 
+def _is_single_stock_overview(message: str) -> bool:
+    """Route single-stock status questions to the stable overview template."""
+
+    if len(_extract_stock_mentions(message)) != 1:
+        return False
+    compact = _norm_text(message)
+    overview_hints = ("어때", "요즘", "흐름", "현황", "상황", "설명", "알려", "분석")
+    cause_hints = ("왜", "원인", "리스크", "공시", "추천", "매수", "매도")
+    return any(hint.upper() in compact for hint in overview_hints) and not any(
+        hint.upper() in compact for hint in cause_hints
+    )
+
+
 def _is_react_step_limit_answer(answer: str | None) -> bool:
     """Detect LangGraph's internal step-limit message before it reaches users."""
 
@@ -368,6 +381,176 @@ def _won_text(value: Any) -> str:
     if isinstance(value, float) and not value.is_integer():
         return f"{value:,.2f}원"
     return f"{int(value):,}원"
+
+
+def _period_label(period: str | None, ohlcv_len: int) -> str:
+    if ohlcv_len > 0:
+        return f"최근 {ohlcv_len}거래일"
+    labels = {
+        "1w": "최근 1주",
+        "1m": "최근 1개월",
+        "3m": "최근 3개월",
+        "6m": "최근 6개월",
+        "1y": "최근 1년",
+    }
+    return labels.get(period or "", "최근 기간")
+
+
+def _recent_trend_from_ohlcv(ohlcv: list[dict]) -> tuple[str, float | None]:
+    closes = [
+        float(row["close"])
+        for row in (ohlcv or [])
+        if isinstance(row.get("close"), (int, float)) and row.get("close") not in (None, 0)
+    ]
+    if len(closes) < 2:
+        return "흐름을 판단할 만큼 차트 데이터가 충분하지 않습니다", None
+    lookback = min(20, len(closes) - 1)
+    base = closes[-lookback - 1]
+    latest = closes[-1]
+    if base == 0:
+        return "흐름을 판단할 만큼 차트 데이터가 충분하지 않습니다", None
+    delta = round((latest - base) / base * 100, 2)
+    if delta >= 3:
+        return "최근에는 올라가는 추세입니다", delta
+    if delta <= -3:
+        return "최근에는 내려가는 추세입니다", delta
+    return "최근에는 큰 방향성 없이 오르내리는 흐름입니다", delta
+
+
+def _direction_from_delta(delta: float | None) -> str:
+    if delta is None:
+        return "unknown"
+    if delta >= 3:
+        return "up"
+    if delta <= -3:
+        return "down"
+    return "neutral"
+
+
+def _direction_from_change(change_pct: Any) -> str:
+    if not isinstance(change_pct, (int, float)):
+        return "unknown"
+    if change_pct > 0:
+        return "up"
+    if change_pct < 0:
+        return "down"
+    return "neutral"
+
+
+def _topic_subject(name: str) -> str:
+    if not name:
+        return "해당 종목은"
+    last = name[-1]
+    code = ord(last)
+    if 0xAC00 <= code <= 0xD7A3:
+        has_jong = (code - 0xAC00) % 28 != 0
+        return f"{name}{'은' if has_jong else '는'}"
+    return f"{name}는"
+
+
+def _stock_overview_lead(
+    name: str,
+    period: str,
+    trend_text: str,
+    trend_pct: float | None,
+    change_pct: Any,
+) -> str:
+    trend_direction = _direction_from_delta(trend_pct)
+    daily_direction = _direction_from_change(change_pct)
+    subject = _topic_subject(name)
+
+    if trend_direction in {"up", "down"} and daily_direction in {"up", "down"}:
+        trend_word = "상승" if trend_direction == "up" else "하락"
+        daily_word = "상승" if daily_direction == "up" else "하락"
+        if trend_direction != daily_direction:
+            return (
+                f"{subject} 일봉 기준으로 보면 {period} 흐름은 {trend_word} 추세지만, "
+                f"기준일 하루 움직임은 전 거래일 대비 {daily_word}입니다."
+            )
+        return (
+            f"{subject} 일봉 기준으로 보면 {period} 흐름과 기준일 하루 움직임 모두 "
+            f"{daily_word} 쪽입니다."
+        )
+
+    if daily_direction in {"up", "down"}:
+        daily_word = "상승" if daily_direction == "up" else "하락"
+        return (
+            f"{subject} 일봉 기준 {period} 차트에서는 {trend_text}. "
+            f"기준일 하루 움직임은 전 거래일 대비 {daily_word}입니다."
+        )
+
+    return f"{subject} 일봉 기준, {period} 차트로 보면 {trend_text}."
+
+
+def _format_stock_overview_answer(panel: dict[str, Any]) -> str:
+    """Create the stable '요즘 흐름' answer for single-stock overview prompts."""
+
+    price_data = (panel.get("price_result") or {}).get("data") or {}
+    news_items = ((panel.get("news_result") or {}).get("data") or {}).get("news") or []
+    disclosures = ((panel.get("disclosure_result") or {}).get("data") or {}).get("disclosures") or []
+
+    name = price_data.get("name") or panel.get("stock") or "해당 종목"
+    change_pct = price_data.get("change_pct")
+    current_price = price_data.get("current_price")
+    ohlcv = price_data.get("ohlcv") or []
+    trend_text, trend_pct = _recent_trend_from_ohlcv(ohlcv)
+    period = _period_label(price_data.get("period"), len(ohlcv))
+    as_of = price_data.get("as_of") or "기준일 확인 불가"
+    snapshot_at = price_data.get("snapshot_at") or "조회시각 확인 불가"
+    first_news = news_items[0] if news_items else {}
+    first_disclosure = disclosures[0] if disclosures else {}
+
+    lines = [
+        "**요즘 흐름**",
+        "",
+        _stock_overview_lead(name, period, trend_text, trend_pct, change_pct),
+        "",
+        f"기준일: {as_of} · 조회시각: {snapshot_at}",
+        f"현재가: {_won_text(current_price)}",
+        f"전 거래일 대비: {_pct_text(change_pct)}",
+    ]
+    if trend_pct is not None:
+        lines.append(f"최근 흐름 변화폭: {trend_pct:+.2f}%")
+
+    if first_news or first_disclosure:
+        lines.extend(["", "**확인한 참고 근거**"])
+        if first_news:
+            lines.append(f"- 뉴스: {first_news.get('title') or '관련 뉴스 확인'}")
+        if first_disclosure:
+            lines.append(
+                f"- 공시: {first_disclosure.get('report_name') or first_disclosure.get('title') or '최근 공시 확인'}"
+            )
+
+    if isinstance(change_pct, (int, float)) and change_pct > 0:
+        followup = "이 움직임의 배경이 궁금하시다면 “왜 올랐어?”라고 물어보시면 뉴스와 공시 근거로 더 자세히 설명해드릴게요."
+    elif isinstance(change_pct, (int, float)) and change_pct < 0:
+        followup = "이 움직임의 배경이 궁금하시다면 “왜 떨어졌어?”라고 물어보시면 뉴스와 공시 근거로 더 자세히 설명해드릴게요."
+    else:
+        followup = "이 움직임의 배경이 궁금하시다면 “왜 움직임이 크지 않아?”처럼 물어보시면 뉴스와 공시 근거로 더 자세히 설명해드릴게요."
+
+    lines.extend(["", followup, "", "※ 투자 자문이 아닌 참고 정보입니다."])
+    return "\n".join(lines)
+
+
+async def _run_stock_overview_route(
+    *,
+    message: str,
+    session_id: str,
+) -> FullReactAgentResult:
+    """Deterministically handle single-stock overview requests."""
+
+    stock = _extract_stock_mentions(message)[0]
+    panel = (await _fetch_multi_stock_overview([stock], session_id=session_id))[0]
+    return FullReactAgentResult(
+        answer=_format_stock_overview_answer(panel),
+        tool_used="get_stock_price,get_news,get_disclosure",
+        used_model="template-market-overview",
+        steps=[
+            {"tool": "get_stock_price", "result": panel["price_result"]},
+            {"tool": "get_news", "result": panel["news_result"]},
+            {"tool": "get_disclosure", "result": panel["disclosure_result"]},
+        ],
+    )
 
 
 def _format_multi_stock_overview_answer(panels: list[dict[str, Any]]) -> str:
@@ -562,6 +745,12 @@ async def run_full_react_agent(
             session_id=session_id,
         )
 
+    if _is_single_stock_overview(message):
+        return await _run_stock_overview_route(
+            message=message,
+            session_id=session_id,
+        )
+
     graph = _get_full_react_graph(session_id, model_id)
     augmented_message = _augment_user_message(message)
     result = await graph.ainvoke(
@@ -653,6 +842,34 @@ async def stream_full_react_agent(
             "content": _format_multi_stock_overview_answer(panels),
             "tool_used": "get_stock_price,get_news,get_disclosure",
             "model": "tool-router",
+        }
+        return
+
+    if _is_single_stock_overview(message):
+        stock = _extract_stock_mentions(message)[0]
+        yield {
+            "type": "thinking",
+            "node": "full_react",
+            "content": f"{stock}의 시세·뉴스·공시를 확인하고 요즘 흐름을 정리하고 있어요.",
+        }
+        panel = (await _fetch_multi_stock_overview([stock], session_id=session_id))[0]
+        for tool_name, result_key in (
+            ("get_stock_price", "price_result"),
+            ("get_news", "news_result"),
+            ("get_disclosure", "disclosure_result"),
+        ):
+            yield {
+                "type": "tool",
+                "node": "full_react",
+                "tool_name": tool_name,
+                "tool_result": _tool_stream_payload(tool_name, panel[result_key]),
+            }
+        yield {
+            "type": "response",
+            "node": "full_react",
+            "content": _format_stock_overview_answer(panel),
+            "tool_used": "get_stock_price,get_news,get_disclosure",
+            "model": "template-market-overview",
         }
         return
 

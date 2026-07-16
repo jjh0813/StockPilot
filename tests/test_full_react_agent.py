@@ -113,6 +113,43 @@ def _fake_disclosure(name: str) -> dict:
     }
 
 
+async def test_full_react_single_stock_overview_uses_flow_template(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_execute(tool_name: str, args: dict, session_id: str = "default"):
+        calls.append((tool_name, args))
+        name = args.get("ticker") or args.get("company") or "종목"
+        if tool_name == "get_stock_price":
+            return _fake_price(name)
+        if tool_name == "get_news":
+            return _fake_news(name)
+        if tool_name == "get_disclosure":
+            return _fake_disclosure(name)
+        raise AssertionError(f"unexpected tool: {tool_name}")
+
+    def fail_if_graph_is_used(*args, **kwargs):  # pragma: no cover - assertion helper
+        raise AssertionError("single-stock overview should not enter LLM graph")
+
+    monkeypatch.setattr(full_react_agent._EXECUTOR, "execute", fake_execute)
+    monkeypatch.setattr(full_react_agent, "_get_full_react_graph", fail_if_graph_is_used)
+
+    events = [
+        event
+        async for event in full_react_agent.stream_full_react_agent(
+            message="카카오 어때",
+            session_id="full-react-single-stock-overview",
+            model_id="solar",
+        )
+    ]
+
+    tool_calls = [call[0] for call in calls]
+    assert tool_calls == ["get_stock_price", "get_news", "get_disclosure"]
+    assert [event["type"] for event in events] == ["thinking", "tool", "tool", "tool", "response"]
+    assert events[-1]["model"] == "template-market-overview"
+    assert "요즘 흐름" in events[-1]["content"]
+    assert "카카오" in events[-1]["content"]
+
+
 async def test_full_react_multi_stock_overview_forces_required_tools(monkeypatch):
     calls: list[tuple[str, dict]] = []
 
