@@ -113,6 +113,16 @@ def _fake_disclosure(name: str) -> dict:
     }
 
 
+def test_stock_overview_removes_orphan_followup_prompt():
+    answer = full_react_agent._remove_orphan_followup_prompts(
+        "카카오는 오늘 소폭 상승했습니다.\n\n왜 올랐어?\n\n※ 투자 자문이 아닌 참고 정보입니다."
+    )
+
+    assert "왜 올랐어?" not in answer
+    assert "카카오는 오늘 소폭 상승했습니다." in answer
+    assert "※ 투자 자문이 아닌 참고 정보입니다." in answer
+
+
 async def test_full_react_single_stock_overview_collects_evidence_then_generates_answer(monkeypatch):
     calls: list[tuple[str, dict]] = []
 
