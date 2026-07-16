@@ -11,6 +11,7 @@ LLM-driven tool loop improves ambiguous routing and follow-up handling.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections.abc import AsyncIterator
@@ -171,6 +172,36 @@ def _norm_text(text: str) -> str:
     return re.sub(r"\s+", "", text or "").upper()
 
 
+def _extract_stock_mentions(message: str) -> list[str]:
+    """Extract explicitly mentioned domestic stock names, preserving user order."""
+
+    norm_message = _norm_text(message)
+    selected: list[tuple[int, str, str]] = []
+    for name in sorted(KNOWN_TICKER_NAMES, key=lambda item: len(_norm_text(item)), reverse=True):
+        norm_name = _norm_text(name)
+        if not norm_name or norm_name not in norm_message:
+            continue
+        if any(norm_name in existing or existing in norm_name for _, existing, _ in selected):
+            continue
+        selected.append((norm_message.find(norm_name), norm_name, name))
+
+    selected.sort(key=lambda item: item[0])
+    return [name for _, _, name in selected]
+
+
+def _is_multi_stock_overview(message: str) -> bool:
+    """Route explicit multi-stock status questions through a completeness gate."""
+
+    if len(_extract_stock_mentions(message)) < 2:
+        return False
+    compact = _norm_text(message)
+    overview_hints = ("어때", "요즘", "흐름", "현황", "상황", "비교")
+    cause_hints = ("왜", "원인", "리스크", "공시", "추천", "매수", "매도")
+    return any(hint.upper() in compact for hint in overview_hints) and not any(
+        hint.upper() in compact for hint in cause_hints
+    )
+
+
 def _mentions_domestic_stock(message: str) -> bool:
     norm = _norm_text(message)
     return any(_norm_text(name) in norm for name in KNOWN_TICKER_NAMES)
@@ -261,6 +292,117 @@ async def _run_generic_recommendation_route() -> FullReactAgentResult:
         tool_used="find_positive_news_stocks",
         used_model="tool-router",
         steps=[{"tool": "find_positive_news_stocks", "result": result}],
+    )
+
+
+async def _fetch_multi_stock_overview(
+    stocks: list[str],
+    *,
+    session_id: str = "default",
+) -> list[dict[str, Any]]:
+    """Fetch the required price/news/disclosure evidence for each stock."""
+
+    async def _fetch_one(stock: str) -> dict[str, Any]:
+        price_result, news_result, disclosure_result = await asyncio.gather(
+            _EXECUTOR.execute(
+                "get_stock_price",
+                {"ticker": stock, "period": "3m"},
+                session_id=session_id,
+            ),
+            _EXECUTOR.execute(
+                "get_news",
+                {"company": stock, "direction": "neutral", "days": 7, "limit": 10},
+                session_id=session_id,
+            ),
+            _EXECUTOR.execute(
+                "get_disclosure",
+                {"ticker": stock, "limit": 8},
+                session_id=session_id,
+            ),
+        )
+        return {
+            "stock": stock,
+            "price_result": price_result,
+            "news_result": news_result,
+            "disclosure_result": disclosure_result,
+        }
+
+    return list(await asyncio.gather(*(_fetch_one(stock) for stock in stocks)))
+
+
+def _pct_text(value: Any) -> str:
+    if not isinstance(value, (int, float)):
+        return "확인 불가"
+    arrow = "▲" if value > 0 else "▼" if value < 0 else "―"
+    return f"{arrow} {abs(value):.2f}%"
+
+
+def _format_multi_stock_overview_answer(panels: list[dict[str, Any]]) -> str:
+    """Create a stable, evidence-based answer for explicit multi-stock overview."""
+
+    lines = [
+        "여러 종목을 함께 물어보셔서, 종목별로 시세·뉴스·공시를 분리해서 확인했습니다.",
+        "",
+    ]
+    for panel in panels:
+        stock = panel["stock"]
+        price_data = (panel.get("price_result") or {}).get("data") or {}
+        news_items = ((panel.get("news_result") or {}).get("data") or {}).get("news") or []
+        disclosures = ((panel.get("disclosure_result") or {}).get("data") or {}).get("disclosures") or []
+
+        name = price_data.get("name") or stock
+        current_price = price_data.get("current_price")
+        change_pct = price_data.get("change_pct")
+        as_of = price_data.get("as_of") or "기준일 확인 불가"
+        first_news = news_items[0] if news_items else {}
+        first_disclosure = disclosures[0] if disclosures else {}
+
+        lines.extend(
+            [
+                f"### {name}",
+                f"- **시세**: {current_price:,}원, 전 거래일 대비 {_pct_text(change_pct)} ({as_of} 기준)"
+                if isinstance(current_price, (int, float))
+                else f"- **시세**: 현재가 확인 불가, 전 거래일 대비 {_pct_text(change_pct)} ({as_of} 기준)",
+                f"- **뉴스**: {first_news.get('title') or '최근 관련 뉴스를 찾지 못했습니다.'}",
+                f"- **공시**: {first_disclosure.get('report_name') or first_disclosure.get('title') or '최근 공시를 찾지 못했습니다.'}",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "요약하면, 각 종목의 등락률은 같은 기준으로 비교하되 뉴스와 공시는 서로 섞지 않고 종목별 근거로 분리해 봐야 합니다.",
+            "",
+            "※ 투자 자문이 아닌 참고 정보입니다.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+async def _run_multi_stock_overview_route(
+    *,
+    message: str,
+    session_id: str,
+) -> FullReactAgentResult:
+    """Deterministically handle explicit multi-stock overview requests."""
+
+    stocks = _extract_stock_mentions(message)[:4]
+    panels = await _fetch_multi_stock_overview(stocks, session_id=session_id)
+    answer = _format_multi_stock_overview_answer(panels)
+    steps: list[dict[str, Any]] = []
+    for panel in panels:
+        steps.extend(
+            [
+                {"tool": "get_stock_price", "result": panel["price_result"]},
+                {"tool": "get_news", "result": panel["news_result"]},
+                {"tool": "get_disclosure", "result": panel["disclosure_result"]},
+            ]
+        )
+    return FullReactAgentResult(
+        answer=answer,
+        tool_used="get_stock_price,get_news,get_disclosure",
+        used_model="tool-router",
+        steps=steps,
     )
 
 
@@ -381,6 +523,12 @@ async def run_full_react_agent(
     if _is_generic_recommendation(message):
         return await _run_generic_recommendation_route()
 
+    if _is_multi_stock_overview(message):
+        return await _run_multi_stock_overview_route(
+            message=message,
+            session_id=session_id,
+        )
+
     graph = _get_full_react_graph(session_id, model_id)
     augmented_message = _augment_user_message(message)
     result = await graph.ainvoke(
@@ -444,6 +592,35 @@ async def stream_full_react_agent(
             "node": "full_react",
             "content": _format_generic_recommendation_answer(result),
             "tool_used": "find_positive_news_stocks",
+            "model": "tool-router",
+        }
+        return
+
+    if _is_multi_stock_overview(message):
+        stocks = _extract_stock_mentions(message)[:4]
+        yield {
+            "type": "thinking",
+            "node": "full_react",
+            "content": "여러 종목의 시세·뉴스·공시를 종목별로 확인하고 있어요.",
+        }
+        panels = await _fetch_multi_stock_overview(stocks, session_id=session_id)
+        for panel in panels:
+            for tool_name, result_key in (
+                ("get_stock_price", "price_result"),
+                ("get_news", "news_result"),
+                ("get_disclosure", "disclosure_result"),
+            ):
+                yield {
+                    "type": "tool",
+                    "node": "full_react",
+                    "tool_name": tool_name,
+                    "tool_result": _tool_stream_payload(tool_name, panel[result_key]),
+                }
+        yield {
+            "type": "response",
+            "node": "full_react",
+            "content": _format_multi_stock_overview_answer(panels),
+            "tool_used": "get_stock_price,get_news,get_disclosure",
             "model": "tool-router",
         }
         return
