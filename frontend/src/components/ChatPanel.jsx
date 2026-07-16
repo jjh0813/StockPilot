@@ -140,6 +140,11 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
             if (!s || !s.price) return
             const sNews = Array.isArray(s.news) ? s.news.filter((n) => n && n.url) : []
             onInsight?.({
+              target: s.target || {
+                ticker: s.price?.ticker,
+                name: s.price?.name,
+                company: s.price?.name,
+              },
               price: s.price,
               news: sNews,
               disclosures: s.disclosures || [],
@@ -151,6 +156,7 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
           && (tr.price || news.length || disclosures.length || tr.disclosure_error)
         ) {
           onInsight?.({
+            target: tr.target || {},
             price: tr.price || null,
             news,
             disclosures,

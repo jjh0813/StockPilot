@@ -205,10 +205,27 @@ def _tool_stream_payload(tool_name: str, result: dict[str, Any]) -> dict[str, An
     data = result.get("data") or {}
     payload: dict[str, Any] = {"react_observation": _compact_tool_result(tool_name, result)}
     if tool_name == "get_stock_price":
+        payload["target"] = {
+            "ticker": data.get("ticker"),
+            "name": data.get("name"),
+            "company": data.get("name"),
+        }
         payload["price"] = data
     elif tool_name == "get_news":
+        company = data.get("company")
+        payload["target"] = {
+            "name": company,
+            "company": company,
+        }
         payload["news"] = data.get("news") or []
     elif tool_name == "get_disclosure":
+        disclosures = data.get("disclosures") or []
+        first = disclosures[0] if disclosures else {}
+        payload["target"] = {
+            "ticker": data.get("ticker") or first.get("stock_code"),
+            "name": first.get("corp_name"),
+            "company": first.get("corp_name"),
+        }
         payload["disclosures"] = data.get("disclosures") or []
     elif tool_name == "find_positive_news_stocks":
         payload["stocks"] = data.get("stocks") or []

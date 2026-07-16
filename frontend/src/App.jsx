@@ -92,6 +92,56 @@ function hasConversationContent(conversation) {
   )
 }
 
+function normalizeInsightKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[^0-9a-z가-힣]/gi, '')
+}
+
+function addInsightKey(keys, value) {
+  const key = normalizeInsightKey(value)
+  if (key) keys.add(key)
+}
+
+function getInsightKeys(insight) {
+  const keys = new Set()
+  const price = insight?.price || {}
+  const target = insight?.target || {}
+  const firstDisclosure = (insight?.disclosures || [])[0] || {}
+
+  addInsightKey(keys, price.ticker)
+  addInsightKey(keys, price.name)
+  addInsightKey(keys, target.ticker)
+  addInsightKey(keys, target.name)
+  addInsightKey(keys, target.company)
+  addInsightKey(keys, firstDisclosure.stock_code)
+  addInsightKey(keys, firstDisclosure.corp)
+  addInsightKey(keys, firstDisclosure.corp_name)
+
+  return keys
+}
+
+function mergeInsight(item, incoming) {
+  const nextNews = incoming.news?.length ? incoming.news : (item.news || [])
+  const nextDisclosures = incoming.disclosures?.length
+    ? incoming.disclosures
+    : (item.disclosures || [])
+
+  return {
+    ...item,
+    target: {
+      ...(item.target || {}),
+      ...(incoming.target || {}),
+    },
+    price: incoming.price || item.price || null,
+    news: nextNews,
+    disclosures: nextDisclosures,
+    disclosureError: incoming.disclosureError || item.disclosureError || '',
+  }
+}
+
 function createConversation({ draft = false } = {}) {
   const now = Date.now()
   return {
@@ -236,7 +286,7 @@ function App() {
   }
 
   function handleInsight(id, insight) {
-    const insightKey = insight?.price?.ticker || insight?.price?.name
+    const incomingKeys = getInsightKeys(insight)
     setConversations((prev) =>
       prev.map((c) =>
         c.id === id
@@ -246,37 +296,22 @@ function App() {
               draft: false,
               insights: (() => {
                 const current = c.insights || []
-                if (!insightKey) {
+                if (!incomingKeys.size) {
                   if (!current.length) return [...current, insight]
                   return current.map((item, index) =>
                     index === current.length - 1
-                      ? {
-                          ...item,
-                          news: insight.news?.length ? insight.news : (item.news || []),
-                          disclosures: insight.disclosures?.length
-                            ? insight.disclosures
-                            : (item.disclosures || []),
-                          disclosureError: insight.disclosureError || item.disclosureError || '',
-                        }
+                      ? mergeInsight(item, insight)
                       : item
                   )
                 }
                 const existingIndex = current.findIndex((item) => {
-                  const key = item?.price?.ticker || item?.price?.name
-                  return key === insightKey
+                  const itemKeys = getInsightKeys(item)
+                  return [...incomingKeys].some((key) => itemKeys.has(key))
                 })
                 if (existingIndex < 0) return [...current, insight]
                 return current.map((item, index) =>
                   index === existingIndex
-                    ? {
-                        ...item,
-                        ...insight,
-                        news: insight.news?.length ? insight.news : (item.news || []),
-                        disclosures: insight.disclosures?.length
-                          ? insight.disclosures
-                          : (item.disclosures || []),
-                        disclosureError: insight.disclosureError || item.disclosureError || '',
-                      }
+                    ? mergeInsight(item, insight)
                     : item
                 )
               })(),

@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage
 import app.agents.react_agent as react_agent
 from app.agents.react_agent import run_react_agent, stream_react_agent
 from app.core.llm import LLMFallbackResult
-from tests.fixtures.tool_responses import directional_news_item, stock_snapshot
+from tests.fixtures.tool_responses import disclosure_item, directional_news_item, stock_snapshot
 
 
 def _llm_result(content: dict) -> LLMFallbackResult:
@@ -103,3 +103,40 @@ async def test_react_agent_streams_tool_and_response_events(react_mocks):
     assert "tool" in event_types
     assert event_types[-1] == "response"
     assert [call[0] for call in react_mocks] == ["get_stock_price", "get_news"]
+
+
+def test_tool_stream_payload_includes_target_metadata():
+    snapshot = stock_snapshot()
+    price_payload = react_agent._tool_stream_payload(
+        "get_stock_price",
+        {"success": True, "data": snapshot},
+    )
+    assert price_payload["target"]["ticker"] == "005930"
+    assert price_payload["target"]["name"] == snapshot["name"]
+
+    news_payload = react_agent._tool_stream_payload(
+        "get_news",
+        {
+            "success": True,
+            "data": {
+                "company": "SK하이닉스",
+                "direction": "neutral",
+                "news": [],
+            },
+        },
+    )
+    assert news_payload["target"]["company"] == "SK하이닉스"
+
+    disclosure = disclosure_item()
+    disclosure_payload = react_agent._tool_stream_payload(
+        "get_disclosure",
+        {
+            "success": True,
+            "data": {
+                "ticker": "005930",
+                "disclosures": [disclosure],
+            },
+        },
+    )
+    assert disclosure_payload["target"]["ticker"] == "005930"
+    assert disclosure_payload["target"]["name"] == disclosure["corp_name"]
