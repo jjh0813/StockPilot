@@ -152,3 +152,38 @@ async def test_full_react_multi_stock_overview_forces_required_tools(monkeypatch
     assert events[-1]["type"] == "response"
     assert "삼성전자" in events[-1]["content"]
     assert "카카오" in events[-1]["content"]
+
+
+async def test_full_react_multi_stock_explanation_uses_completeness_gate(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_execute(tool_name: str, args: dict, session_id: str = "default"):
+        calls.append((tool_name, args))
+        name = args.get("ticker") or args.get("company") or "종목"
+        if tool_name == "get_stock_price":
+            return _fake_price(name)
+        if tool_name == "get_news":
+            return _fake_news(name)
+        if tool_name == "get_disclosure":
+            return _fake_disclosure(name)
+        raise AssertionError(f"unexpected tool: {tool_name}")
+
+    def fail_if_graph_is_used(*args, **kwargs):  # pragma: no cover - assertion helper
+        raise AssertionError("multi-stock explanation should not enter LLM graph")
+
+    monkeypatch.setattr(full_react_agent._EXECUTOR, "execute", fake_execute)
+    monkeypatch.setattr(full_react_agent, "_get_full_react_graph", fail_if_graph_is_used)
+
+    result = await full_react_agent.run_full_react_agent(
+        message="삼성전자, 카카오 설명해줘",
+        session_id="full-react-multi-stock-explanation",
+        model_id="solar",
+    )
+
+    tool_calls = [call[0] for call in calls]
+    assert tool_calls.count("get_stock_price") == 2
+    assert tool_calls.count("get_news") == 2
+    assert tool_calls.count("get_disclosure") == 2
+    assert result.used_model == "tool-router"
+    assert "삼성전자" in result.answer
+    assert "카카오" in result.answer

@@ -207,6 +207,7 @@ def _tool_stream_payload(tool_name: str, result: dict[str, Any]) -> dict[str, An
     if tool_name == "get_stock_price":
         payload["target"] = {
             "ticker": data.get("ticker"),
+            "stock_code": data.get("ticker"),
             "name": data.get("name"),
             "company": data.get("name"),
         }
@@ -221,8 +222,10 @@ def _tool_stream_payload(tool_name: str, result: dict[str, Any]) -> dict[str, An
     elif tool_name == "get_disclosure":
         disclosures = data.get("disclosures") or []
         first = disclosures[0] if disclosures else {}
+        stock_code = first.get("stock_code")
         payload["target"] = {
             "ticker": data.get("ticker") or first.get("stock_code"),
+            "stock_code": stock_code,
             "name": first.get("corp_name"),
             "company": first.get("corp_name"),
         }

@@ -112,6 +112,7 @@ def test_tool_stream_payload_includes_target_metadata():
         {"success": True, "data": snapshot},
     )
     assert price_payload["target"]["ticker"] == "005930"
+    assert price_payload["target"]["stock_code"] == "005930"
     assert price_payload["target"]["name"] == snapshot["name"]
 
     news_payload = react_agent._tool_stream_payload(
@@ -139,4 +140,5 @@ def test_tool_stream_payload_includes_target_metadata():
         },
     )
     assert disclosure_payload["target"]["ticker"] == "005930"
+    assert disclosure_payload["target"]["stock_code"] == disclosure["stock_code"]
     assert disclosure_payload["target"]["name"] == disclosure["corp_name"]

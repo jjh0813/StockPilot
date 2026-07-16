@@ -114,6 +114,8 @@ function getInsightKeys(insight) {
   addInsightKey(keys, price.ticker)
   addInsightKey(keys, price.name)
   addInsightKey(keys, target.ticker)
+  addInsightKey(keys, target.stock_code)
+  addInsightKey(keys, target.stockCode)
   addInsightKey(keys, target.name)
   addInsightKey(keys, target.company)
   addInsightKey(keys, firstDisclosure.stock_code)

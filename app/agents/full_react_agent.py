@@ -120,13 +120,23 @@ _OBVIOUS_OUT_OF_SCOPE_RE = re.compile(
     r"(배고프|밥\s*먹|점심|저녁|맛집|날씨|영화|노래|축구|야구|심심|졸려|잠와)",
     re.IGNORECASE,
 )
+_REACT_STEP_LIMIT_RE = re.compile(
+    r"sorry,\s*need\s*more\s*steps\s*to\s*process\s*this\s*request",
+    re.IGNORECASE,
+)
+_REACT_STEP_LIMIT_FALLBACK_MESSAGE = (
+    "확인해야 할 근거가 많아 답변 생성 루프가 제한에 걸렸어요. "
+    "차트·뉴스·공시 카드는 화면에 먼저 반영했으니, 같은 질문을 한 종목씩 나누어 물어보면 "
+    "뉴스와 공시 근거를 바탕으로 더 안정적으로 정리해드릴게요.\n\n"
+    "※ 투자 자문이 아닌 참고 정보입니다."
+)
 
 
 def _merge_config(
     *,
     session_id: str,
     user_id: str | None = None,
-    recursion_limit: int = 12,
+    recursion_limit: int = 24,
     thread_id: str | None = None,
 ) -> dict[str, Any]:
     """Build LangGraph config with both checkpointer thread_id and Langfuse."""
@@ -195,11 +205,26 @@ def _is_multi_stock_overview(message: str) -> bool:
     if len(_extract_stock_mentions(message)) < 2:
         return False
     compact = _norm_text(message)
-    overview_hints = ("어때", "요즘", "흐름", "현황", "상황", "비교")
+    overview_hints = ("어때", "요즘", "흐름", "현황", "상황", "비교", "설명", "알려", "분석")
     cause_hints = ("왜", "원인", "리스크", "공시", "추천", "매수", "매도")
     return any(hint.upper() in compact for hint in overview_hints) and not any(
         hint.upper() in compact for hint in cause_hints
     )
+
+
+def _is_react_step_limit_answer(answer: str | None) -> bool:
+    """Detect LangGraph's internal step-limit message before it reaches users."""
+
+    return bool(_REACT_STEP_LIMIT_RE.search(answer or ""))
+
+
+def _safe_final_answer(answer: str | None) -> str:
+    """Keep internal ReAct failure text out of the product UI."""
+
+    cleaned = sanitize_llm_output(answer or "")
+    if not cleaned or _is_react_step_limit_answer(cleaned):
+        return _REACT_STEP_LIMIT_FALLBACK_MESSAGE
+    return cleaned
 
 
 def _mentions_domestic_stock(message: str) -> bool:
@@ -542,9 +567,7 @@ async def run_full_react_agent(
     messages = result.get("messages") or []
     steps = _collect_steps(messages)
     final_message = _last_final_ai_message(messages)
-    answer = sanitize_llm_output(_content_to_text(final_message.content if final_message else ""))
-    if not answer:
-        answer = "확인 가능한 근거가 부족해 답변을 만들지 못했습니다."
+    answer = _safe_final_answer(_content_to_text(final_message.content if final_message else ""))
 
     return FullReactAgentResult(
         answer=answer,
@@ -664,7 +687,7 @@ async def stream_full_react_agent(
                             ),
                         }
                     else:
-                        final_answer = sanitize_llm_output(_content_to_text(latest.content))
+                        final_answer = _safe_final_answer(_content_to_text(latest.content))
                         used_model = _used_model_from_message(latest, model_id)
 
                 if node_name == "tools":
@@ -684,8 +707,7 @@ async def stream_full_react_agent(
         yield {
             "type": "response",
             "node": "full_react",
-            "content": final_answer
-            or "확인 가능한 근거가 부족해 답변을 만들지 못했습니다.",
+            "content": _safe_final_answer(final_answer),
             "tool_used": ",".join(tool_names) or None,
             "model": used_model,
         }
