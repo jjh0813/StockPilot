@@ -192,6 +192,7 @@ function App() {
   const [username, setUsername] = useState(() => getUsername() || null)
   const [showAuth, setShowAuth] = useState(false)
   const syncTimer = useRef(null)
+  const insightScrollRef = useRef(null)
 
   // 로그인 상태로 앱을 열면 서버의 내 대화를 불러온다.
   useEffect(() => {
@@ -400,6 +401,27 @@ function App() {
   const visibleConversations = conversations.filter(hasConversationContent)
   const insights = active?.insights || []
   const hasInsight = insights.length > 0
+  const insightScrollSignature = insights
+    .map((ins) => [
+      ins.price?.ticker || ins.price?.name || ins.target?.ticker || ins.target?.name || '',
+      ins.news?.length || 0,
+      ins.disclosures?.length || 0,
+    ].join(':'))
+    .join('|')
+
+  useEffect(() => {
+    const el = insightScrollRef.current
+    if (!el || !hasInsight) return
+
+    const frame = requestAnimationFrame(() => {
+      el.scrollTo({
+        top: el.scrollHeight,
+        behavior: 'smooth',
+      })
+    })
+
+    return () => cancelAnimationFrame(frame)
+  }, [activeId, hasInsight, insightScrollSignature])
 
   return (
     <div className="relative min-h-screen bg-black text-neutral-100">
@@ -467,7 +489,7 @@ function App() {
                   transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
                   className="hidden min-h-0 overflow-hidden lg:block"
                 >
-                  <div className="no-scrollbar flex h-full w-full flex-col gap-8 overflow-y-auto px-2 pb-2 pt-1">
+                  <div ref={insightScrollRef} className="no-scrollbar flex h-full w-full flex-col gap-8 overflow-y-auto px-2 pb-2 pt-1">
                     {insights.map((ins, i) => (
                       <StockPanel
                         key={i}
