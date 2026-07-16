@@ -16,6 +16,7 @@ import json
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any
 
@@ -90,6 +91,7 @@ class FullReactAgentResult:
 
 _CHECKPOINTER = MemorySaver()
 _EXECUTOR = ToolExecutor()
+_KST = timezone(timedelta(hours=9))
 _OUT_OF_SCOPE_MESSAGE = (
     "저는 주식 리서치 전용 도우미라 주식·종목·뉴스·공시·재무·투자용어와 "
     "관련된 질문만 답변할 수 있어요. 예를 들어 “삼성전자 어때?”, "
@@ -383,6 +385,28 @@ def _won_text(value: Any) -> str:
     return f"{int(value):,}원"
 
 
+def _format_date_text(value: Any) -> str:
+    if not value:
+        return "기준일 확인 불가"
+    text = str(value)
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return text.replace("-", ". ")
+    return text
+
+
+def _format_datetime_text(value: Any) -> str:
+    if not value:
+        return "조회시각 확인 불가"
+    text = str(value)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_KST)
+    return parsed.astimezone(_KST).strftime("%Y. %m. %d. %H:%M")
+
+
 def _period_label(period: str | None, ohlcv_len: int) -> str:
     if ohlcv_len > 0:
         return f"최근 {ohlcv_len}거래일"
@@ -495,8 +519,8 @@ def _format_stock_overview_answer(panel: dict[str, Any]) -> str:
     ohlcv = price_data.get("ohlcv") or []
     trend_text, trend_pct = _recent_trend_from_ohlcv(ohlcv)
     period = _period_label(price_data.get("period"), len(ohlcv))
-    as_of = price_data.get("as_of") or "기준일 확인 불가"
-    snapshot_at = price_data.get("snapshot_at") or "조회시각 확인 불가"
+    as_of = _format_date_text(price_data.get("as_of"))
+    snapshot_at = _format_datetime_text(price_data.get("snapshot_at"))
     first_news = news_items[0] if news_items else {}
     first_disclosure = disclosures[0] if disclosures else {}
 
