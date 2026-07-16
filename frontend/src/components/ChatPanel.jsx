@@ -126,11 +126,14 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
         const news = Array.isArray(tr.news) ? tr.news.filter((n) => n && n.url) : []
         const disclosures = Array.isArray(tr.disclosures) ? tr.disclosures : []
         const shouldUpdatePanel = tr.panel_update !== false
-        patchLastAssistant({
-          price: tr.price || null,
-          sources: news,
+        patchLastAssistant((m) => ({
           status: 'streaming',
-        })
+          // Full ReAct streams get_stock_price/get_news/get_disclosure as
+          // separate tool events. Do not wipe the existing price/sources when
+          // a later tool event carries only news or only disclosures.
+          price: tr.price || m.price || null,
+          sources: news.length ? news : (m.sources || []),
+        }))
         if (shouldUpdatePanel && Array.isArray(tr.stocks) && tr.stocks.length) {
           // 급등 스크리너: 종목별 차트·뉴스·공시를 순서대로 가운데에 쌓는다.
           tr.stocks.forEach((s) => {
@@ -143,9 +146,12 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
               disclosureError: s.disclosure_error || '',
             })
           })
-        } else if (shouldUpdatePanel && tr.price) {
+        } else if (
+          shouldUpdatePanel
+          && (tr.price || news.length || disclosures.length || tr.disclosure_error)
+        ) {
           onInsight?.({
-            price: tr.price,
+            price: tr.price || null,
             news,
             disclosures,
             disclosureError: tr.disclosure_error || '',

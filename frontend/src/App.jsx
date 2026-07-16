@@ -246,13 +246,39 @@ function App() {
               draft: false,
               insights: (() => {
                 const current = c.insights || []
-                if (!insightKey) return [...current, insight]
+                if (!insightKey) {
+                  if (!current.length) return [...current, insight]
+                  return current.map((item, index) =>
+                    index === current.length - 1
+                      ? {
+                          ...item,
+                          news: insight.news?.length ? insight.news : (item.news || []),
+                          disclosures: insight.disclosures?.length
+                            ? insight.disclosures
+                            : (item.disclosures || []),
+                          disclosureError: insight.disclosureError || item.disclosureError || '',
+                        }
+                      : item
+                  )
+                }
                 const existingIndex = current.findIndex((item) => {
                   const key = item?.price?.ticker || item?.price?.name
                   return key === insightKey
                 })
                 if (existingIndex < 0) return [...current, insight]
-                return current.map((item, index) => (index === existingIndex ? insight : item))
+                return current.map((item, index) =>
+                  index === existingIndex
+                    ? {
+                        ...item,
+                        ...insight,
+                        news: insight.news?.length ? insight.news : (item.news || []),
+                        disclosures: insight.disclosures?.length
+                          ? insight.disclosures
+                          : (item.disclosures || []),
+                        disclosureError: insight.disclosureError || item.disclosureError || '',
+                      }
+                    : item
+                )
               })(),
             }
           : c
