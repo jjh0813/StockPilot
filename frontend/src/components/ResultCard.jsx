@@ -33,6 +33,18 @@ function dirWord(p) {
   return '보합'
 }
 
+function uniquePrices(prices) {
+  const seen = new Set()
+  const result = []
+  for (const price of prices || []) {
+    const key = String(price?.ticker || price?.name || '').trim().toLowerCase().replace(/\s+/g, '')
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    result.push(price)
+  }
+  return result
+}
+
 function formatDate(value) {
   if (!value) return '확인 불가'
   const date = new Date(value)
@@ -58,7 +70,9 @@ function formatDateTime(value) {
   }).format(date)
 }
 
-function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms, usedModel, modelNotice }) {
+function ResultCard({ status, thinking, price, prices, answer, sources, errorMsg, terms, usedModel, modelNotice }) {
+  const priceList = uniquePrices(prices)
+  const showPriceList = priceList.length > 1
   const pct = price && price.change_pct !== null && price.change_pct !== undefined
     ? Number(price.change_pct)
     : null
@@ -91,7 +105,31 @@ function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms,
 
       {status === 'error' && <p className="text-red-300">{errorMsg}</p>}
 
-      {hasPct && (
+      {showPriceList && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {priceList.map((item) => {
+            const itemPct = item?.change_pct !== null && item?.change_pct !== undefined
+              ? Number(item.change_pct)
+              : null
+            const hasItemPct = itemPct !== null && !Number.isNaN(itemPct)
+            return (
+              <div
+                key={item.ticker || item.name}
+                className="rounded-xl border border-white/10 bg-black/15 px-3 py-2"
+              >
+                <span className="mr-2 text-sm text-neutral-200">{item.name || item.ticker || '종목'}</span>
+                {hasItemPct && (
+                  <span className={`text-sm font-semibold ${colorFor(itemPct)}`}>
+                    {formatPct(itemPct)}
+                  </span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {!showPriceList && hasPct && (
         <div className="mb-1 flex items-baseline gap-3">
           <span className="text-lg text-neutral-200">{price.name || '종목'}</span>
           <span className={`text-4xl font-bold ${colorFor(pct)}`}>
@@ -100,12 +138,12 @@ function ResultCard({ status, thinking, price, answer, sources, errorMsg, terms,
           <span className="text-sm text-neutral-400">{dirWord(pct)}</span>
         </div>
       )}
-      {price && price.current_price != null && (
+      {!showPriceList && price && price.current_price != null && (
         <p className="text-neutral-300">
           현재가 {Number(price.current_price).toLocaleString()}원
         </p>
       )}
-      {price && (
+      {!showPriceList && price && (
         <p className="mb-4 mt-2 text-xs leading-relaxed text-neutral-500">
           일봉 기준 · 등락률은 전 거래일 대비 · 기준일 {formatDate(price.as_of)} · 조회시각{' '}
           {formatDateTime(price.snapshot_at)}

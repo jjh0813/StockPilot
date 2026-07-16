@@ -53,6 +53,20 @@ function fallbackNotice(requestedModel, usedModel) {
   return `${modelLabel(requestedModel)} 응답에 실패해서 ${modelLabel(usedModel)}로 대체했습니다.`
 }
 
+function priceKey(price) {
+  return String(price?.ticker || price?.name || '').trim().toLowerCase().replace(/\s+/g, '')
+}
+
+function mergePrices(existing, incoming) {
+  const current = Array.isArray(existing) ? existing : []
+  if (!incoming) return current
+  const key = priceKey(incoming)
+  if (!key) return current
+  const index = current.findIndex((item) => priceKey(item) === key)
+  if (index < 0) return [...current, incoming]
+  return current.map((item, i) => (i === index ? { ...item, ...incoming } : item))
+}
+
 function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, onInsight }) {
   const [messages, setMessages] = useState(initialMessages || [])
   const [input, setInput] = useState('')
@@ -109,6 +123,7 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
         price: null,
         answer: '',
         sources: [],
+        prices: [],
         terms: [],
         requestedModel,
         usedModel: '',
@@ -131,7 +146,8 @@ function ChatPanel({ sessionId, initialMessages, seed, hint, onMessagesChange, o
           // Full ReAct streams get_stock_price/get_news/get_disclosure as
           // separate tool events. Do not wipe the existing price/sources when
           // a later tool event carries only news or only disclosures.
-          price: tr.price || m.price || null,
+          prices: mergePrices(m.prices, tr.price),
+          price: mergePrices(m.prices, tr.price).length > 1 ? null : (tr.price || m.price || null),
           sources: news.length ? news : (m.sources || []),
         }))
         if (shouldUpdatePanel && Array.isArray(tr.stocks) && tr.stocks.length) {
