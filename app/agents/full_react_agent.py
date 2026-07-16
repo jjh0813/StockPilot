@@ -362,6 +362,14 @@ def _pct_text(value: Any) -> str:
     return f"{arrow} {abs(value):.2f}%"
 
 
+def _won_text(value: Any) -> str:
+    if not isinstance(value, (int, float)):
+        return "현재가 확인 불가"
+    if isinstance(value, float) and not value.is_integer():
+        return f"{value:,.2f}원"
+    return f"{int(value):,}원"
+
+
 def _format_multi_stock_overview_answer(panels: list[dict[str, Any]]) -> str:
     """Create a stable, evidence-based answer for explicit multi-stock overview."""
 
@@ -385,7 +393,7 @@ def _format_multi_stock_overview_answer(panels: list[dict[str, Any]]) -> str:
         lines.extend(
             [
                 f"### {name}",
-                f"- **시세**: {current_price:,}원, 전 거래일 대비 {_pct_text(change_pct)} ({as_of} 기준)"
+                f"- **시세**: {_won_text(current_price)}, 전 거래일 대비 {_pct_text(change_pct)} ({as_of} 기준)"
                 if isinstance(current_price, (int, float))
                 else f"- **시세**: 현재가 확인 불가, 전 거래일 대비 {_pct_text(change_pct)} ({as_of} 기준)",
                 f"- **뉴스**: {first_news.get('title') or '최근 관련 뉴스를 찾지 못했습니다.'}",
